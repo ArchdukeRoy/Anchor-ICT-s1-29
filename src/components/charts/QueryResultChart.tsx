@@ -148,24 +148,89 @@ function downloadJson(filename: string, value: unknown) {
   URL.revokeObjectURL(url)
 }
 
-function downloadPlotSvg(graphElement: HTMLElement | null, filename: string) {
-  const svg = graphElement?.querySelector('svg.main-svg')
-  if (!(svg instanceof SVGSVGElement)) return
-
-  const clonedSvg = svg.cloneNode(true) as SVGSVGElement
-  clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-
-  const blob = new Blob([new XMLSerializer().serializeToString(clonedSvg)], {
-    type: 'image/svg+xml;charset=utf-8',
-  })
-  const url = URL.createObjectURL(blob)
+function triggerDownload(url: string, filename: string) {
   const link = document.createElement('a')
   link.href = url
   link.download = filename
   document.body.appendChild(link)
   link.click()
   link.remove()
-  URL.revokeObjectURL(url)
+}
+
+function downloadPlotPng(
+  graphElement: HTMLElement | null,
+  filename: string,
+  title: string,
+  yAxisTitle?: string,
+) {
+  const svg = graphElement?.querySelector('svg.main-svg')
+  if (!(svg instanceof SVGSVGElement)) return
+
+  const rect = svg.getBoundingClientRect()
+  const width = Math.max(Math.round(rect.width), 1)
+  const height = Math.max(Math.round(rect.height), 1)
+  const clonedSvg = svg.cloneNode(true) as SVGSVGElement
+  clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+  clonedSvg.setAttribute('width', String(width))
+  clonedSvg.setAttribute('height', String(height))
+
+  const svgBlob = new Blob([new XMLSerializer().serializeToString(clonedSvg)], {
+    type: 'image/svg+xml;charset=utf-8',
+  })
+  const svgUrl = URL.createObjectURL(svgBlob)
+  const image = new Image()
+
+  image.onload = () => {
+    const scale = 2
+    const titleHeight = 64
+    const axisTitleWidth = yAxisTitle ? 48 : 0
+    const isDark = document.documentElement.classList.contains('dark')
+    const canvas = document.createElement('canvas')
+    canvas.width = (width + axisTitleWidth) * scale
+    canvas.height = (height + titleHeight) * scale
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      URL.revokeObjectURL(svgUrl)
+      return
+    }
+
+    context.scale(scale, scale)
+    context.fillStyle = isDark ? '#030712' : '#ffffff'
+    context.fillRect(0, 0, width + axisTitleWidth, height + titleHeight)
+    context.fillStyle = isDark ? '#f9fafb' : '#111827'
+    context.font = '600 18px Inter, system-ui, sans-serif'
+    context.textBaseline = 'middle'
+    context.fillText(title, axisTitleWidth + 24, titleHeight / 2)
+
+    if (yAxisTitle) {
+      context.save()
+      context.translate(20, titleHeight + height / 2)
+      context.rotate(-Math.PI / 2)
+      context.font = '600 14px Inter, system-ui, sans-serif'
+      context.textAlign = 'center'
+      context.fillText(yAxisTitle, 0, 0)
+      context.restore()
+    }
+
+    context.drawImage(image, axisTitleWidth, titleHeight, width, height)
+    URL.revokeObjectURL(svgUrl)
+
+    canvas.toBlob((pngBlob) => {
+      if (!pngBlob) return
+
+      const pngUrl = URL.createObjectURL(pngBlob)
+      triggerDownload(pngUrl, filename)
+      URL.revokeObjectURL(pngUrl)
+    }, 'image/png')
+  }
+
+  image.onerror = () => {
+    URL.revokeObjectURL(svgUrl)
+  }
+
+  image.src = svgUrl
 }
 
 // Long actor/location names are shortened on the axis, while full labels remain available in hover text.
@@ -257,11 +322,13 @@ function LineChart({
   yKey,
   yLabel,
   fileName,
+  title,
 }: {
   rows: Record<string, unknown>[]
   yKey: string
   yLabel: string
   fileName: string
+  title: string
 }) {
   const plotRef = useRef<HTMLElement | null>(null)
 
@@ -270,7 +337,7 @@ function LineChart({
   const plotTheme = getPlotTheme()
   const showMarkers = rows.length <= 26
   const downloadChart = () => {
-    downloadPlotSvg(plotRef.current, fileName)
+    downloadPlotPng(plotRef.current, fileName, title, yLabel)
   }
 
   return (
@@ -292,7 +359,7 @@ function LineChart({
           ]}
           layout={{
             autosize: true,
-            margin: { t: 12, r: 24, b: 56, l: 72 },
+            margin: { t: 12, r: 24, b: 56, l: 96 },
             paper_bgcolor: 'transparent',
             plot_bgcolor: 'transparent',
             font: { family: 'Inter, system-ui, sans-serif', size: 13, color: plotTheme.labelColor },
@@ -310,7 +377,7 @@ function LineChart({
               gridcolor: plotTheme.gridColor,
               zeroline: false,
               tickfont: { size: 12, color: plotTheme.axisColor },
-              title: { text: yLabel, font: { size: 12, color: plotTheme.axisColor } },
+              title: { text: yLabel, font: { size: 12, color: plotTheme.axisColor }, standoff: 12 },
             },
             showlegend: false,
             hovermode: 'x unified',
@@ -327,7 +394,7 @@ function LineChart({
         />
       </div>
       <div className="mt-3 flex justify-end">
-        <DownloadButton label="Download SVG" onClick={downloadChart} />
+        <DownloadButton label="Download PNG" onClick={downloadChart} />
       </div>
     </>
   )
@@ -338,11 +405,13 @@ function BarChart({
   labelKey,
   valueKey,
   fileName,
+  title,
 }: {
   rows: Record<string, unknown>[]
   labelKey: string
   valueKey: string
   fileName: string
+  title: string
 }) {
   const plotRef = useRef<HTMLElement | null>(null)
 
@@ -351,7 +420,7 @@ function BarChart({
   const plotTheme = getPlotTheme()
   const fullLabels = rows.map((row) => formatValue(row[labelKey]))
   const downloadChart = () => {
-    downloadPlotSvg(plotRef.current, fileName)
+    downloadPlotPng(plotRef.current, fileName, title)
   }
 
   return (
@@ -404,13 +473,21 @@ function BarChart({
         />
       </div>
       <div className="mt-3 flex justify-end">
-        <DownloadButton label="Download SVG" onClick={downloadChart} />
+        <DownloadButton label="Download PNG" onClick={downloadChart} />
       </div>
     </>
   )
 }
 
-function EventTypeChart({ rows, fileName }: { rows: Record<string, unknown>[]; fileName: string }) {
+function EventTypeChart({
+  rows,
+  fileName,
+  title,
+}: {
+  rows: Record<string, unknown>[]
+  fileName: string
+  title: string
+}) {
   // Prefer backend CAMEO descriptions when present, but fall back to root codes for older signal builds.
   const labelledRows = rows.map((row) => ({
     ...row,
@@ -419,7 +496,7 @@ function EventTypeChart({ rows, fileName }: { rows: Record<string, unknown>[]; f
       : formatValue(row.cameo_root),
   }))
 
-  return <BarChart rows={labelledRows} labelKey="label" valueKey="event_count" fileName={fileName} />
+  return <BarChart rows={labelledRows} labelKey="label" valueKey="event_count" fileName={fileName} title={title} />
 }
 
 export default function QueryResultChart({ intent, data }: QueryResultChartProps) {
@@ -429,25 +506,26 @@ export default function QueryResultChart({ intent, data }: QueryResultChartProps
     [intent.signal, rows],
   )
   const { rows: streamedRows, isStreaming } = useProgressiveRows(preparedRows)
-  const svgFileName = filenameFor(intent.signal, 'svg')
+  const pngFileName = filenameFor(intent.signal, 'png')
   const jsonFileName = filenameFor(intent.signal, 'json')
+  const chartTitle = signalTitles[intent.signal]
 
   // The LLM chooses a signal; this component chooses the safest visual form for that signal's data shape.
   let content
   if (isStreaming && streamedRows.length === 0) {
     content = <StreamingPlaceholder />
   } else if (intent.signal === 'event_volume') {
-    content = <LineChart rows={streamedRows} yKey="event_count" yLabel="Events" fileName={svgFileName} />
+    content = <LineChart rows={streamedRows} yKey="event_count" yLabel="Events" fileName={pngFileName} title={chartTitle} />
   } else if (intent.signal === 'tone_over_time') {
-    content = <LineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={svgFileName} />
+    content = <LineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={pngFileName} title={chartTitle} />
   } else if (intent.signal === 'media_attention') {
-    content = <LineChart rows={streamedRows} yKey="total_mentions" yLabel="Mentions" fileName={svgFileName} />
+    content = <LineChart rows={streamedRows} yKey="total_mentions" yLabel="Mentions" fileName={pngFileName} title={chartTitle} />
   } else if (intent.signal === 'actor_frequency') {
-    content = <BarChart rows={streamedRows} labelKey="actor" valueKey="event_count" fileName={svgFileName} />
+    content = <BarChart rows={streamedRows} labelKey="actor" valueKey="event_count" fileName={pngFileName} title={chartTitle} />
   } else if (intent.signal === 'location_frequency') {
-    content = <BarChart rows={streamedRows} labelKey="location" valueKey="event_count" fileName={svgFileName} />
+    content = <BarChart rows={streamedRows} labelKey="location" valueKey="event_count" fileName={pngFileName} title={chartTitle} />
   } else if (intent.signal === 'event_type') {
-    content = <EventTypeChart rows={streamedRows} fileName={svgFileName} />
+    content = <EventTypeChart rows={streamedRows} fileName={pngFileName} title={chartTitle} />
   } else if (intent.signal === 'actor_location_graph' && isGraphData(data)) {
     content = <ResultTable rows={streamedRows} fileName={jsonFileName} />
   } else {
@@ -458,7 +536,7 @@ export default function QueryResultChart({ intent, data }: QueryResultChartProps
     <div className="query-result-panel mt-4 rounded-xl border border-gray-200 bg-gray-50/70 p-6 dark:border-gray-800 dark:bg-gray-950/70">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{signalTitles[intent.signal]}</h3>
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{chartTitle}</h3>
         </div>
         {isStreaming && (
           <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600 dark:bg-brand-900/30 dark:text-brand-200">
