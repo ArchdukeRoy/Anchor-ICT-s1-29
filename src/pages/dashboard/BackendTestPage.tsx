@@ -517,7 +517,7 @@ export default function BackendTestPage() {
           onRun={async v => {
             const { data, duration } = await callApi(`/graphs/${v.event_name}`, 'POST', {
               query_text: v.query_text,
-              intent_json: v.intent_json,
+              intent_json: JSON.parse(v.intent_json),
               label: v.label || null,
             })
             return { data, duration }
