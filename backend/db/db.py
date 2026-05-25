@@ -18,6 +18,7 @@ def _connect(db_path: str = DB_PATH) -> sqlite3.Connection:
     """Return a SQLite connection with row_factory set to return dicts."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -224,7 +225,11 @@ def get_media_attention(
                 """
                 SELECT
                     strftime('%Y', event_date) || '-W' ||
-                    printf('%02d', strftime('%W', event_date)) AS period,
+                    printf('%02d', (
+                        (julianday(date(event_date)) - julianday(
+                            strftime('%Y', event_date) || '-01-04'
+                        )) / 7 + 1
+                    )) AS period,
                     SUM(num_mentions) AS total_mentions
                 FROM events
                 WHERE num_mentions IS NOT NULL

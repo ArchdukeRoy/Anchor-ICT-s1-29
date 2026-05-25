@@ -116,15 +116,16 @@ def make_test_db() -> sqlite3.Connection:
 def make_test_df() -> pd.DataFrame:
     """
     Synthetic events DataFrame with known values for deterministic assertions.
-    5 rows across 2 dates, 2 CAMEO roots, 3 actors, 3 locations.
-    Row 3 has null actor1 to test null-skipping behaviour.
+    5 rows across 2 dates, 2 CAMEO roots, 4 actors, 3 locations.
+    actor2 values are included to exercise actor frequency and actor-location graph logic.
+    Row 3 has null actor1 to test null-skipping behaviour for actor1 while still counting actor2.
     """
     return pd.DataFrame({
         "event_date":      pd.to_datetime(["2026-04-01", "2026-04-01", "2026-04-02",
                                            "2026-04-02", "2026-04-02"]),
         "cameo_code":      ["140", "181", "190", "181", "140"],
         "actor1":          ["ActorA", "ActorB", "ActorA", None,    "ActorC"],
-        "actor2":          [None,     None,     None,    None,    None],
+        "actor2":          ["ActorB", "ActorC", None,    "ActorD", "ActorA"],
         "country":         ["SU",     "SU",     "US",    "SU",    "SU"],
         "location":        ["Khartoum", "Omdurman", "Khartoum", "Darfur", "Omdurman"],
         "goldstein_scale": [-5.0,    -7.0,     -10.0,   -3.0,    -8.0],
@@ -247,6 +248,22 @@ def test_event_type_correct_roots():
     print(f"  PASS — build_event_type() roots correct: {rows}")
 
 
+def test_event_type_cameo_description_populated():
+    conn = make_test_db()
+    df = make_test_df()
+    build_event_type(conn, df, "sudan_2023")
+
+    cur = conn.cursor()
+    cur.execute("SELECT cameo_root, cameo_description FROM signals_event_type ORDER BY cameo_root")
+    rows = dict(cur.fetchall())
+
+    assert rows["14"] == "Protest"
+    assert rows["18"] == "Assault"
+    assert rows["19"] == "Fight"
+    conn.close()
+    print(f"  PASS — build_event_type() cameo_description populated: {rows}")
+
+
 # ---------------------------------------------------------------------------
 # Tests — build_actor_frequency
 # ---------------------------------------------------------------------------
@@ -259,8 +276,8 @@ def test_actor_frequency_skips_nulls():
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM signals_actor_frequency")
     count = cur.fetchone()[0]
-    # 3 non-null actors: ActorA(×2), ActorB(×1), ActorC(×1)
-    assert count == 3, f"Expected 3 actors, got {count}"
+    # Non-null actors: ActorA, ActorB, ActorC, ActorD
+    assert count == 4, f"Expected 4 actors, got {count}"
     conn.close()
     print(f"  PASS — build_actor_frequency() skipped nulls, {count} actors inserted")
 
@@ -274,11 +291,36 @@ def test_actor_frequency_correct_counts():
     cur.execute("SELECT actor, event_count FROM signals_actor_frequency ORDER BY actor")
     rows = dict(cur.fetchall())
 
-    assert rows["ActorA"] == 2
-    assert rows["ActorB"] == 1
-    assert rows["ActorC"] == 1
+    assert rows["ActorA"] == 3
+    assert rows["ActorB"] == 2
+    assert rows["ActorC"] == 2
+    assert rows["ActorD"] == 1
     conn.close()
     print(f"  PASS — build_actor_frequency() counts correct: {rows}")
+
+
+def test_actor_frequency_actor2_only_actor_is_counted():
+    conn = make_test_db()
+    df = make_test_df()
+    extra = pd.DataFrame({
+        "event_date":      pd.to_datetime(["2026-04-03"]),
+        "cameo_code":      ["140"],
+        "actor1":          [None],
+        "actor2":          ["ActorE"],
+        "country":         ["SU"],
+        "location":        ["Khartoum"],
+        "goldstein_scale": [-5.0],
+        "num_mentions":    [1],
+        "source_url":      ["http://example.com/extra"],
+    })
+    build_actor_frequency(conn, pd.concat([df, extra], ignore_index=True), "sudan_2023")
+
+    cur = conn.cursor()
+    cur.execute("SELECT actor, event_count FROM signals_actor_frequency WHERE actor='ActorE'")
+    row = cur.fetchone()
+    assert row is not None and row[1] == 1, f"Expected ActorE count 1, got {row}"
+    conn.close()
+    print("  PASS — build_actor_frequency() included actor2-only actors")
 
 
 # ---------------------------------------------------------------------------
@@ -350,9 +392,8 @@ def test_actor_location_graph_skips_null_actor_or_location():
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM signals_actor_location_graph")
     count = cur.fetchone()[0]
-    # Row 3 has null actor1 → skipped
-    # Valid pairs: ActorA-Khartoum(×2), ActorB-Omdurman(×1), ActorC-Omdurman(×1) = 3 edges
-    assert count == 3, f"Expected 3 edges, got {count}"
+    # Valid pairs include actor1 and actor2 contributions, skipping null actor or location.
+    assert count == 6, f"Expected 6 edges, got {count}"
     conn.close()
     print(f"  PASS — build_actor_location_graph() skipped nulls, {count} edges inserted")
 
@@ -367,8 +408,11 @@ def test_actor_location_graph_edge_weights():
     rows = {(r[0], r[1]): r[2] for r in cur.fetchall()}
 
     assert rows[("ActorA", "Khartoum")] == 2
+    assert rows[("ActorA", "Omdurman")] == 1
+    assert rows[("ActorB", "Khartoum")] == 1
     assert rows[("ActorB", "Omdurman")] == 1
-    assert rows[("ActorC", "Omdurman")] == 1
+    assert rows[("ActorC", "Omdurman")] == 2
+    assert rows[("ActorD", "Darfur")] == 1
     conn.close()
     print(f"  PASS — build_actor_location_graph() edge weights correct: {rows}")
 
@@ -405,8 +449,10 @@ if __name__ == "__main__":
         test_event_volume_correct_counts,
         test_event_volume_upsert_updates_count,
         test_event_type_correct_roots,
+        test_event_type_cameo_description_populated,
         test_actor_frequency_skips_nulls,
         test_actor_frequency_correct_counts,
+        test_actor_frequency_actor2_only_actor_is_counted,
         test_location_frequency_correct_counts,
         test_tone_over_time_avg_correct,
         test_tone_over_time_skips_null_goldstein,

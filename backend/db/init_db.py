@@ -127,6 +127,17 @@ def init_db(db_path: str = DB_PATH) -> None:
             status           TEXT,
             notes            TEXT
         );
+
+        CREATE INDEX IF NOT EXISTS idx_events_event_date ON events(event_date);
+        CREATE INDEX IF NOT EXISTS idx_events_cameo_code ON events(cameo_code);
+        CREATE INDEX IF NOT EXISTS idx_events_actor1 ON events(actor1);
+        CREATE INDEX IF NOT EXISTS idx_events_actor2 ON events(actor2);
+        CREATE INDEX IF NOT EXISTS idx_events_location ON events(location);
+        CREATE INDEX IF NOT EXISTS idx_signals_event_volume_config ON signals_event_volume(event_config);
+        CREATE INDEX IF NOT EXISTS idx_signals_actor_frequency_config ON signals_actor_frequency(event_config);
+        CREATE INDEX IF NOT EXISTS idx_signals_location_frequency_config ON signals_location_frequency(event_config);
+        CREATE INDEX IF NOT EXISTS idx_signals_tone_over_time_config ON signals_tone_over_time(event_config);
+        CREATE INDEX IF NOT EXISTS idx_signals_actor_location_graph_config ON signals_actor_location_graph(event_config);
     """)
 
     conn.commit()
