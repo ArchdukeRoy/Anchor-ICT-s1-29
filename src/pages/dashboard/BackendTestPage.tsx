@@ -19,6 +19,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import { EventTypePoint, EventVolumePoint, PeriodType } from '@/lib/types'
+import QueryResultChart from '@/components/charts/QueryResultChart'
 
 // Types
 
@@ -147,7 +148,7 @@ function StatusBadge({ status }: { status: Status }) {
 
 function ResultPanel({ result }: { result: TestResult }) {
   const [open, setOpen] = useState(true)
-  if (result.status === 'idle' || result.status === 'loading') return null
+  if (result.status === 'idle' || result.status === 'loading' || result.data === null) return null
 
   const isError = result.status === 'error'
   const showChart = !isError && result.chartType && Array.isArray(result.data)
@@ -221,6 +222,12 @@ interface TestCardProps {
   fields: Field[]
   onRun: (values: Record<string, string>) => Promise<unknown>
   accent?: string
+}
+
+interface QueryIntent {
+  chart_type: string
+  signal: string
+  params: Record<string, unknown>
 }
 
 function TestCard({ icon, title, description, fields, onRun, accent = 'bg-brand-600' }: TestCardProps) {
@@ -304,6 +311,82 @@ function TestCard({ icon, title, description, fields, onRun, accent = 'bg-brand-
       </button>
 
       <ResultPanel result={result} />
+    </div>
+  )
+}
+
+function SavedGraphsCard() {
+  const [charts, setCharts] = useState<{ intent: QueryIntent; data: unknown; label: string | null }[]>([])
+
+  return (
+    <div>
+      <TestCard
+        icon={<BookMarked className="h-4 w-4" />}
+        title="get_saved_graphs()"
+        description="Returns visible saved graphs and renders each one."
+        accent="bg-teal-600"
+        fields={[
+          { key: 'event_name', label: 'event_name', placeholder: 'e.g. sudan_2023', defaultValue: 'sudan_2023' },
+          { key: 'include_hidden', label: 'include_hidden', type: 'select', options: ['false', 'true'], defaultValue: 'false' },
+        ]}
+        onRun={async v => {
+          setCharts([])
+
+          const { data, duration } = await callApi(
+            `/graphs/${v.event_name}?include_hidden=${v.include_hidden}`  // ← fixed URL
+          )
+
+          const rows = data as {
+            event_config: string
+            intent_json: string
+            label: string | null
+          }[]
+
+          const results = await Promise.all(
+            rows.map(async row => {
+              const parsed = typeof row.intent_json === 'string'
+                ? JSON.parse(row.intent_json)
+                : row.intent_json
+
+              // Backend saves intent with "type" key; QueryResultChart expects "signal"
+              const intent: QueryIntent = {
+                chart_type: parsed.chart_type ?? parsed.type ?? '',
+                signal: parsed.signal ?? parsed.type ?? '',  // ← handle both shapes
+                params: parsed.params ?? {},
+              }
+
+              const signalEndpointMap: Record<string, string> = {
+                event_volume:         `/signals/${row.event_config}/event-volume?period_type=${intent.params?.period_type ?? 'daily'}`,
+                event_type:           `/signals/${row.event_config}/event-type`,
+                actor_frequency:      `/signals/${row.event_config}/actor-frequency?limit=${intent.params?.limit ?? 10}`,
+                location_frequency:   `/signals/${row.event_config}/location-frequency?limit=${intent.params?.limit ?? 10}`,
+                tone_over_time:       `/signals/${row.event_config}/tone-over-time?period_type=${intent.params?.period_type ?? 'weekly'}`,
+                media_attention:      `/signals/${row.event_config}/media-attention?period_type=${intent.params?.period_type ?? 'daily'}`,
+                actor_location_graph: `/signals/${row.event_config}/actor-location-graph?min_edge_weight=${intent.params?.min_edge_weight ?? 1}`,
+                recent_events:        `/dashboard/${row.event_config}/recent-events?limit=${intent.params?.limit ?? 20}`,
+              }
+
+              const endpoint = signalEndpointMap[intent.signal]
+              if (!endpoint) throw new Error(`Unknown signal: "${intent.signal}" in saved graph`)
+
+              const { data: chartData } = await callApi(endpoint)
+              return { intent, data: chartData, label: row.label }
+            })
+          )
+
+          setCharts(results)
+          return { data: null, duration }
+        }}
+      />
+
+      {charts.map((chart, i) => (
+        <div key={i} className="mt-4">
+          {chart.label && (
+            <p className="mb-1 text-xs font-medium text-gray-500">{chart.label}</p>
+          )}
+          <QueryResultChart intent={chart.intent} data={chart.data} />
+        </div>
+      ))}
     </div>
   )
 }
@@ -480,28 +563,8 @@ export default function BackendTestPage() {
 
       {/* Saved Graph Functions */}
       <Section title="Saved Graph Functions" subtitle="Create, retrieve, hide and delete saved graphs">
-        <TestCard
-          icon={<BookMarked className="h-4 w-4" />}
-          title="get_saved_graphs()"
-          description="Returns visible saved graphs. Toggle include_hidden to see all."
-          accent="bg-teal-600"
-          fields={[
-            { key: 'event_name', label: 'event_name', placeholder: 'e.g. sudan_2023', defaultValue: 'sudan_2023' },
-            {
-              key: 'include_hidden',
-              label: 'include_hidden',
-              type: 'select',
-              options: ['false', 'true'],
-              defaultValue: 'false',
-            },
-          ]}
-          onRun={async v => {
-            const { data, duration } = await callApi(
-              `/graphs/${v.event_name}?include_hidden=${v.include_hidden}`
-            )
-            return { data, duration }
-          }}
-        />
+        
+        <SavedGraphsCard/>
 
         <TestCard
           icon={<BookMarked className="h-4 w-4" />}
