@@ -150,7 +150,7 @@ function SavedGraphsPanel() {
         )}
  
         {!loading && !error && graphs.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 lg:grid-cols-2">
             {graphs.map(graph => (
               <SavedGraphCard key={graph.id} graph={graph} onDelete={handleDelete} />
             ))}
@@ -176,10 +176,10 @@ function SavedGraphCard({
     : null
  
   return (
-    <div className="group flex flex-col rounded-lg border border-gray-200 bg-gray-50 p-3.5 transition hover:border-gray-300 hover:shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700">
+    <div className="group flex flex-col rounded-lg border border-gray-200 bg-white transition hover:border-gray-300 hover:shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700">
       {/* Title row */}
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium text-gray-800 leading-snug dark:text-gray-100">
+      <div className="flex items-center justify-between gap-2 px-4 pt-4">
+        <p className="text-sm font-semibold text-gray-800 leading-snug dark:text-gray-100">
           {graph.label ?? graph.query_text}
         </p>
         <button
@@ -192,12 +192,12 @@ function SavedGraphCard({
       </div>
  
       {/* Chart */}
-      <div className="mt-3 h-52">
-        <QueryResultChart intent={graph.intent} data={graph.data} />
+      <div className="px-2">
+        <QueryResultChart intent={graph.intent} data={graph.data} embedded />
       </div>
  
       {/* Footer */}
-      <div className="mt-3 flex items-center gap-2">
+      <div className="flex items-center gap-2 border-t border-gray-100 px-4 py-2.5 dark:border-gray-800">
         <span className="rounded bg-brand-50 px-1.5 py-0.5 text-xs font-medium text-brand-600 dark:bg-brand-950 dark:text-brand-400">
           {graph.intent.signal}
         </span>

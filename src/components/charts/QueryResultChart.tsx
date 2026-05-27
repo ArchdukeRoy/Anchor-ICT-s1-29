@@ -21,6 +21,7 @@ interface QueryIntent {
 interface QueryResultChartProps {
   intent: QueryIntent
   data: unknown
+  embedded?: boolean   // true = no outer card wrapper, no download button, compact height
 }
 
 interface DownloadButtonProps {
@@ -323,12 +324,14 @@ function LineChart({
   yLabel,
   fileName,
   title,
+  embedded,
 }: {
   rows: Record<string, unknown>[]
   yKey: string
   yLabel: string
   fileName: string
   title: string
+  embedded?: boolean
 }) {
   const plotRef = useRef<HTMLElement | null>(null)
 
@@ -342,7 +345,7 @@ function LineChart({
 
   return (
     <>
-      <div className="query-plot-frame h-[360px]">
+      <div className={`query-plot-frame ${embedded ? 'h-[220px]' : 'h-[360px]'}`}>
         <Plot
           data={[
             {
@@ -393,9 +396,11 @@ function LineChart({
           style={{ width: '100%', height: '100%' }}
         />
       </div>
-      <div className="mt-3 flex justify-end">
-        <DownloadButton label="Download PNG" onClick={downloadChart} />
-      </div>
+      {!embedded && (
+        <div className="mt-3 flex justify-end">
+          <DownloadButton label="Download PNG" onClick={downloadChart} />
+        </div>
+      )}
     </>
   )
 }
@@ -406,12 +411,14 @@ function BarChart({
   valueKey,
   fileName,
   title,
+  embedded,
 }: {
   rows: Record<string, unknown>[]
   labelKey: string
   valueKey: string
   fileName: string
   title: string
+  embedded?: boolean
 }) {
   const plotRef = useRef<HTMLElement | null>(null)
 
@@ -425,7 +432,7 @@ function BarChart({
 
   return (
     <>
-      <div className="query-plot-frame h-[360px]">
+      <div className={`query-plot-frame ${embedded ? 'h-[220px]' : 'h-[360px]'}`}>
         <Plot
           data={[
             {
@@ -472,9 +479,11 @@ function BarChart({
           style={{ width: '100%', height: '100%' }}
         />
       </div>
-      <div className="mt-3 flex justify-end">
-        <DownloadButton label="Download PNG" onClick={downloadChart} />
-      </div>
+      {!embedded && (
+        <div className="mt-3 flex justify-end">
+          <DownloadButton label="Download PNG" onClick={downloadChart} />
+        </div>
+      )}
     </>
   )
 }
@@ -483,12 +492,13 @@ function EventTypeChart({
   rows,
   fileName,
   title,
+  embedded,
 }: {
   rows: Record<string, unknown>[]
   fileName: string
   title: string
+  embedded?: boolean
 }) {
-  // Prefer backend CAMEO descriptions when present, but fall back to root codes for older signal builds.
   const labelledRows = rows.map((row) => ({
     ...row,
     label: row.cameo_description
@@ -496,10 +506,10 @@ function EventTypeChart({
       : formatValue(row.cameo_root),
   }))
 
-  return <BarChart rows={labelledRows} labelKey="label" valueKey="event_count" fileName={fileName} title={title} />
+  return <BarChart rows={labelledRows} labelKey="label" valueKey="event_count" fileName={fileName} title={title} embedded={embedded} />
 }
 
-export default function QueryResultChart({ intent, data }: QueryResultChartProps) {
+export default function QueryResultChart({ intent, data, embedded = false }: QueryResultChartProps) {
   const rows = useMemo(() => (isGraphData(data) ? data.edges : asRecords(data)), [data])
   const preparedRows = useMemo(
     () => prepareRowsForSignal(intent.signal, rows),
@@ -510,26 +520,29 @@ export default function QueryResultChart({ intent, data }: QueryResultChartProps
   const jsonFileName = filenameFor(intent.signal, 'json')
   const chartTitle = signalTitles[intent.signal]
 
-  // The LLM chooses a signal; this component chooses the safest visual form for that signal's data shape.
   let content
   if (isStreaming && streamedRows.length === 0) {
     content = <StreamingPlaceholder />
   } else if (intent.signal === 'event_volume') {
-    content = <LineChart rows={streamedRows} yKey="event_count" yLabel="Events" fileName={pngFileName} title={chartTitle} />
+    content = <LineChart rows={streamedRows} yKey="event_count" yLabel="Events" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'tone_over_time') {
-    content = <LineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={pngFileName} title={chartTitle} />
+    content = <LineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'media_attention') {
-    content = <LineChart rows={streamedRows} yKey="total_mentions" yLabel="Mentions" fileName={pngFileName} title={chartTitle} />
+    content = <LineChart rows={streamedRows} yKey="total_mentions" yLabel="Mentions" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'actor_frequency') {
-    content = <BarChart rows={streamedRows} labelKey="actor" valueKey="event_count" fileName={pngFileName} title={chartTitle} />
+    content = <BarChart rows={streamedRows} labelKey="actor" valueKey="event_count" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'location_frequency') {
-    content = <BarChart rows={streamedRows} labelKey="location" valueKey="event_count" fileName={pngFileName} title={chartTitle} />
+    content = <BarChart rows={streamedRows} labelKey="location" valueKey="event_count" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'event_type') {
-    content = <EventTypeChart rows={streamedRows} fileName={pngFileName} title={chartTitle} />
+    content = <EventTypeChart rows={streamedRows} fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'actor_location_graph' && isGraphData(data)) {
     content = <ResultTable rows={streamedRows} fileName={jsonFileName} />
   } else {
     content = <ResultTable rows={streamedRows} fileName={jsonFileName} />
+  }
+
+  if (embedded) {
+    return <>{content}</>
   }
 
   return (
