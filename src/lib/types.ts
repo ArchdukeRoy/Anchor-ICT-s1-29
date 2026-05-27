@@ -13,3 +13,10 @@ export interface EventTypePoint {
     cameo_description: string
     event_count: number
 }
+
+// structured intent object returned by the LLM and stored in saved_graphs.intent_json
+export interface QueryIntent {
+    chart_type: string
+    signal: string   
+    params: Record<string, string | number>
+}
