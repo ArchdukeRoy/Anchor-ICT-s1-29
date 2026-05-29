@@ -18,6 +18,7 @@ def _connect(db_path: str = DB_PATH) -> sqlite3.Connection:
     """Return a SQLite connection with row_factory set to return dicts."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -219,32 +220,32 @@ def get_media_attention(
     """
     conn = _connect(db_path)
     try:
+        cur = conn.execute(
+            """
+            SELECT
+                DATE(event_date) AS period,
+                SUM(num_mentions) AS total_mentions
+            FROM events
+            WHERE num_mentions IS NOT NULL
+            GROUP BY period
+            ORDER BY period ASC
+            """
+        )
+        daily_rows = [dict(row) for row in cur.fetchall()]
+
         if period_type == "weekly":
-            cur = conn.execute(
-                """
-                SELECT
-                    strftime('%Y', event_date) || '-W' ||
-                    printf('%02d', strftime('%W', event_date)) AS period,
-                    SUM(num_mentions) AS total_mentions
-                FROM events
-                WHERE num_mentions IS NOT NULL
-                GROUP BY period
-                ORDER BY period ASC
-                """
-            )
-        else:
-            cur = conn.execute(
-                """
-                SELECT
-                    DATE(event_date) AS period,
-                    SUM(num_mentions) AS total_mentions
-                FROM events
-                WHERE num_mentions IS NOT NULL
-                GROUP BY period
-                ORDER BY period ASC
-                """
-            )
-        return [dict(row) for row in cur.fetchall()]
+            weekly_agg: dict[str, int] = {}
+            for row in daily_rows:
+                date_key = row["period"]
+                if date_key is None:
+                    continue
+                dt = datetime.strptime(date_key, "%Y-%m-%d").date()
+                iso_week = dt.isocalendar()
+                week_label = f"{iso_week.year}-W{iso_week.week:02d}"
+                weekly_agg[week_label] = weekly_agg.get(week_label, 0) + int(row["total_mentions"])
+            return [{"period": period, "total_mentions": total} for period, total in sorted(weekly_agg.items())]
+
+        return daily_rows
     finally:
         conn.close()
 

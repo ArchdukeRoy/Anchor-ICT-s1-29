@@ -85,16 +85,47 @@ def build_event_type(conn: sqlite3.Connection, df: pd.DataFrame, event_config: s
     grouped = df_valid.groupby("cameo_root").size().reset_index()
     grouped.columns = ["cameo_root", "event_count"]
 
+    CAMEO_LABELS = {
+        "01": "Make Public Statement",
+        "02": "Appeal",
+        "03": "Express Intent to Cooperate",
+        "04": "Consult",
+        "05": "Engage in Diplomatic Cooperation",
+        "06": "Engage in Material Cooperation",
+        "07": "Provide Aid",
+        "08": "Yield",
+        "09": "Investigate",
+        "10": "Demand",
+        "11": "Disapprove",
+        "12": "Reject",
+        "13": "Threaten",
+        "14": "Protest",
+        "15": "Exhibit Force Posture",
+        "16": "Reduce Relations",
+        "17": "Coerce",
+        "18": "Assault",
+        "19": "Fight",
+        "20": "Use Unconventional Mass Violence",
+    }
+
     upserted = 0
     for _, row in grouped.iterrows():
         conn.execute(
             """
-            INSERT INTO signals_event_type (event_config, cameo_root, event_count, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
+            INSERT INTO signals_event_type (event_config, cameo_root, cameo_description, event_count, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
             ON CONFLICT(event_config, cameo_root)
-            DO UPDATE SET event_count = excluded.event_count, updated_at = excluded.updated_at
+            DO UPDATE SET
+                cameo_description = excluded.cameo_description,
+                event_count = excluded.event_count,
+                updated_at = excluded.updated_at
             """,
-            (event_config, row["cameo_root"], int(row["event_count"])),
+            (
+                event_config,
+                row["cameo_root"],
+                CAMEO_LABELS.get(row["cameo_root"], ""),
+                int(row["event_count"]),
+            ),
         )
         upserted += 1
 
@@ -105,12 +136,15 @@ def build_event_type(conn: sqlite3.Connection, df: pd.DataFrame, event_config: s
 
 def build_actor_frequency(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
-    Aggregate event counts per actor1. Null actors are skipped.
+    Aggregate event counts across both actor1 and actor2.
+    Null actors are skipped. Each non-null actor appearance counts separately.
     Returns total rows upserted.
     """
-    df_valid = df.dropna(subset=["actor1"])
+    actors1 = df.dropna(subset=["actor1"])[["actor1"]].rename(columns={"actor1": "actor"})
+    actors2 = df.dropna(subset=["actor2"])[["actor2"]].rename(columns={"actor2": "actor"})
+    combined = pd.concat([actors1, actors2], ignore_index=True)
 
-    grouped = df_valid.groupby("actor1").size().reset_index()
+    grouped = combined.groupby("actor").size().reset_index()
     grouped.columns = ["actor", "event_count"]
 
     upserted = 0
@@ -209,13 +243,17 @@ def build_tone_over_time(conn: sqlite3.Connection, df: pd.DataFrame, event_confi
 def build_actor_location_graph(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
     Build actor-location edge weights for the network graph signal.
-    Rows missing actor1 or location are skipped.
+    Generates edges from both actor1 and actor2 against location.
+    Rows missing actor or location are skipped.
     Returns total rows upserted.
     """
-    df_valid = df.dropna(subset=["actor1", "location"])
+    actor_location_pairs = pd.concat([
+        df[["actor1", "location"]].rename(columns={"actor1": "actor"}),
+        df[["actor2", "location"]].rename(columns={"actor2": "actor"}),
+    ], ignore_index=True)
 
-    grouped = df_valid.groupby(["actor1", "location"]).size().reset_index()
-    grouped.columns = ["actor", "location", "edge_weight"]
+    df_valid = actor_location_pairs.dropna(subset=["actor", "location"])
+    grouped = df_valid.groupby(["actor", "location"]).size().reset_index(name="edge_weight")
 
     upserted = 0
     for _, row in grouped.iterrows():
