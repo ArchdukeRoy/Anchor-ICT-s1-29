@@ -146,12 +146,11 @@ function ChartActionButton({ label, icon: Icon }: ChartActionButtonProps) {
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 shadow-sm transition hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800"
       title={label}
       aria-label={label}
     >
       <Icon className="h-3.5 w-3.5" />
-      {label}
     </button>
   )
 }
@@ -571,9 +570,9 @@ export default function QueryResultChart({ intent, data, embedded = false }: Que
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{chartTitle}</h3>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <ChartActionButton icon={Save} />
-          <ChartActionButton icon={ThumbsUp} />
-          <ChartActionButton icon={ThumbsDown} />
+          <ChartActionButton label="Save graph" icon={Save} />
+          <ChartActionButton label="Like" icon={ThumbsUp} />
+          <ChartActionButton label="Dislike" icon={ThumbsDown} />
         </div>
       </div>
       {content}
