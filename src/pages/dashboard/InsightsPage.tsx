@@ -100,7 +100,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {message.content && <div className="whitespace-pre-wrap">{message.content}</div>}
 
         {isAssistant && message.result && (
-          <QueryResultChart intent={message.result.intent} data={message.result.data} />
+          <QueryResultChart
+            intent={message.result.intent}
+            data={message.result.data}
+            eventName={message.result.event_name}
+            queryText={message.result.query}
+          />
         )}
       </div>
 

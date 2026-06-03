@@ -22,6 +22,8 @@ interface QueryResultChartProps {
   intent: QueryIntent
   data: unknown
   embedded?: boolean   // true = no outer card wrapper, no download button, compact height
+  eventName?: string
+  queryText?: string
 }
 
 interface DownloadButtonProps {
@@ -32,6 +34,9 @@ interface DownloadButtonProps {
 interface ChartActionButtonProps {
   label: string
   icon: typeof Save
+  onClick?: () => void
+  disabled?: boolean
+  active?: boolean
 }
 
 const signalTitles: Record<SignalName, string> = {
@@ -142,16 +147,22 @@ function DownloadButton({ label, onClick }: DownloadButtonProps) {
   )
 }
 
-function ChartActionButton({ label, icon: Icon }: ChartActionButtonProps) {
+function ChartActionButton({ label, icon: Icon, onClick, disabled, active }: ChartActionButtonProps) {
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 shadow-sm transition hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800"
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition
+        ${active
+          ? 'border-brand-400 bg-brand-50 text-brand-700 dark:border-brand-500 dark:bg-brand-950 dark:text-brand-300'
+          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800'
+        }
+        disabled:cursor-not-allowed disabled:opacity-40`}
       title={label}
       aria-label={label}
     >
       <Icon className="h-3.5 w-3.5" />
-      {label}
     </button>
   )
 }
@@ -528,7 +539,41 @@ function EventTypeChart({
   return <BarChart rows={labelledRows} labelKey="label" valueKey="event_count" fileName={fileName} title={title} embedded={embedded} />
 }
 
-export default function QueryResultChart({ intent, data, embedded = false }: QueryResultChartProps) {
+export default function QueryResultChart({ intent, data, embedded = false, eventName, queryText }: QueryResultChartProps) {
+  const [graphId, setGraphId] = useState<number | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [savedRating, setSavedRating] = useState<1 | -1 | null>(null)
+
+  const handleSave = async () => {
+    if (graphId || isSaving || !eventName || !queryText) return
+    setIsSaving(true)
+    try {
+      const res = await fetch(`http://localhost:8000/graphs/${eventName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query_text: queryText, intent_json: intent }),
+      })
+      const json = await res.json() as { id: number }
+      setGraphId(json.id)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleRate = async (rating: 1 | -1) => {
+    if (!graphId) return
+    if (savedRating === rating) {
+      setSavedRating(null)
+      return
+    }
+    await fetch(`http://localhost:8000/graphs/${graphId}/rate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating }),
+    })
+    setSavedRating(rating)
+  }
+  
   const rows = useMemo(() => (isGraphData(data) ? data.edges : asRecords(data)), [data])
   const preparedRows = useMemo(
     () => prepareRowsForSignal(intent.signal, rows),
@@ -571,9 +616,27 @@ export default function QueryResultChart({ intent, data, embedded = false }: Que
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{chartTitle}</h3>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <ChartActionButton icon={Save} />
-          <ChartActionButton icon={ThumbsUp} />
-          <ChartActionButton icon={ThumbsDown} />
+          <ChartActionButton
+            icon={Save}
+            label={graphId ? 'Saved' : isSaving ? 'Saving…' : 'Save'}
+            onClick={() => void handleSave()}
+            disabled={isSaving || !!graphId || !eventName}
+            active={!!graphId}
+          />
+          <ChartActionButton
+            icon={ThumbsUp}
+            label="Good"
+            onClick={() => void handleRate(1)}
+            disabled={!graphId}
+            active={savedRating === 1}
+          />
+          <ChartActionButton
+            icon={ThumbsDown}
+            label="Bad"
+            onClick={() => void handleRate(-1)}
+            disabled={!graphId}
+            active={savedRating === -1}
+          />
         </div>
       </div>
       {content}
