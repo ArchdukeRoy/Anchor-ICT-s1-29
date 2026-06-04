@@ -36,6 +36,9 @@ interface DownloadButtonProps {
 interface ChartActionButtonProps {
   label: string
   icon: typeof Save
+  onClick?: () => void
+  disabled?: boolean
+  active?: boolean
 }
 
 const signalTitles: Record<SignalName, string> = {
@@ -146,11 +149,18 @@ function DownloadButton({ label, onClick }: DownloadButtonProps) {
   )
 }
 
-function ChartActionButton({ label, icon: Icon }: ChartActionButtonProps) {
+function ChartActionButton({ label, icon: Icon, onClick, disabled, active }: ChartActionButtonProps) {
   return (
     <button
       type="button"
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800"
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition
+        ${active
+          ? 'border-brand-400 bg-brand-50 text-brand-700 dark:border-brand-500 dark:bg-brand-950 dark:text-brand-300'
+          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800'
+        }
+        disabled:cursor-not-allowed disabled:opacity-40`}
       title={label}
       aria-label={label}
     >
