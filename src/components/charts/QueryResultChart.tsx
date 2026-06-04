@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, Save, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { CheckCircle2, Download, Loader2, Save, ThumbsDown, ThumbsUp } from 'lucide-react'
 import Plot from 'react-plotly.js'
 
 type SignalName =
@@ -18,10 +18,14 @@ interface QueryIntent {
   params: Record<string, unknown>
 }
 
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+
 interface QueryResultChartProps {
   intent: QueryIntent
   data: unknown
   embedded?: boolean   // true = no outer card wrapper, no download button, compact height
+  onSave?: () => Promise<void>
+  saveState?: SaveState
 }
 
 interface DownloadButtonProps {
@@ -151,6 +155,38 @@ function ChartActionButton({ label, icon: Icon }: ChartActionButtonProps) {
       aria-label={label}
     >
       <Icon className="h-3.5 w-3.5" />
+    </button>
+  )
+}
+
+function SaveButton({ onSave, saveState = 'idle' }: { onSave?: () => Promise<void>; saveState?: SaveState }) {
+  const isSaving = saveState === 'saving'
+  const isSaved  = saveState === 'saved'
+  const isError  = saveState === 'error'
+
+  const label = isSaved ? 'Saved!' : isError ? 'Save failed — retry' : 'Save graph'
+
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={isSaving || isSaved}
+      title={label}
+      aria-label={label}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition
+        ${isSaved
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
+          : isError
+            ? 'border-red-200 bg-red-50 text-red-500 hover:bg-red-100 dark:border-red-800 dark:bg-red-950'
+            : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800'
+        } disabled:cursor-not-allowed`}
+    >
+      {isSaving
+        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        : isSaved
+          ? <CheckCircle2 className="h-3.5 w-3.5" />
+          : <Save className="h-3.5 w-3.5" />
+      }
     </button>
   )
 }
@@ -527,7 +563,7 @@ function EventTypeChart({
   return <BarChart rows={labelledRows} labelKey="label" valueKey="event_count" fileName={fileName} title={title} embedded={embedded} />
 }
 
-export default function QueryResultChart({ intent, data, embedded = false }: QueryResultChartProps) {
+export default function QueryResultChart({ intent, data, embedded = false, onSave, saveState }: QueryResultChartProps) {
   const rows = useMemo(() => (isGraphData(data) ? data.edges : asRecords(data)), [data])
   const preparedRows = useMemo(
     () => prepareRowsForSignal(intent.signal, rows),
@@ -570,7 +606,7 @@ export default function QueryResultChart({ intent, data, embedded = false }: Que
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{chartTitle}</h3>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <ChartActionButton label="Save graph" icon={Save} />
+          <SaveButton onSave={onSave} saveState={saveState} />
           <ChartActionButton label="Like" icon={ThumbsUp} />
           <ChartActionButton label="Dislike" icon={ThumbsDown} />
         </div>
