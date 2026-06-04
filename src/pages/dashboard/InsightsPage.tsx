@@ -45,27 +45,6 @@ const starterPrompts = [
   'Show average conflict tone over time.',
 ]
 
-const BASE_URL = 'http://localhost:8000'
-
-async function saveGraph(result: QueryResponse): Promise<void> {
-  // Route: POST /graphs/{event_name}
-  // intent_json must be a dict (not a string) per SaveGraphRequest model
-  const body = {
-    query_text: result.query,
-    intent_json: result.intent,
-    label: null,
-  }
-  const response = await fetch(`${BASE_URL}/graphs/${result.event_name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`${response.status} ${response.statusText}: ${text}`)
-  }
-}
-
 async function submitQuery(promptText: string, model: LlmModel): Promise<QueryResponse> {
   const response = await fetch('/query', {
     method: 'POST',
@@ -96,32 +75,9 @@ async function submitQuery(promptText: string, model: LlmModel): Promise<QueryRe
   return response.json() as Promise<QueryResponse>
 }
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-
-function MessageBubble({
-  message,
-  onSave,
-}: {
-  message: ChatMessage
-  onSave?: (result: QueryResponse) => Promise<void>
-}) {
+function MessageBubble({ message }: { message: ChatMessage }) {
   const isAssistant = message.role === 'assistant'
   const hasChart = isAssistant && Boolean(message.result)
-  const [saveState, setSaveState] = useState<SaveState>('idle')
-
-  const handleSave = async () => {
-    if (!message.result || !onSave || saveState === 'saving' || saveState === 'saved') return
-    setSaveState('saving')
-    try {
-      await onSave(message.result)
-      setSaveState('saved')
-    } catch {
-      setSaveState('error')
-      // Reset error state after a moment so the user can retry
-      setTimeout(() => setSaveState('idle'), 3000)
-    }
-  }
-
   return (
     <div className={`flex gap-4 ${isAssistant ? 'justify-start' : 'justify-end'}`}>
       {isAssistant && (
@@ -146,8 +102,8 @@ function MessageBubble({
           <QueryResultChart
             intent={message.result.intent}
             data={message.result.data}
-            onSave={handleSave}
-            saveState={saveState}
+            eventName={message.result.event_name}
+            queryText={message.result.query}
           />
         )}
       </div>
@@ -291,7 +247,7 @@ export default function InsightsPage() {
         ) : (
           <div className="mx-auto max-w-6xl space-y-6">
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} onSave={saveGraph} />
+              <MessageBubble key={message.id} message={message} />
             ))}
             {isThinking && <LoadingBubble />}
           </div>

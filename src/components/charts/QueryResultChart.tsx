@@ -18,14 +18,12 @@ interface QueryIntent {
   params: Record<string, unknown>
 }
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-
 interface QueryResultChartProps {
   intent: QueryIntent
   data: unknown
   embedded?: boolean   // true = no outer card wrapper, no download button, compact height
-  onSave?: () => Promise<void>
-  saveState?: SaveState
+  eventName?: string
+  queryText?: string
 }
 
 interface DownloadButtonProps {
@@ -169,34 +167,66 @@ function ChartActionButton({ label, icon: Icon, onClick, disabled, active }: Cha
   )
 }
 
-function SaveButton({ onSave, saveState = 'idle' }: { onSave?: () => Promise<void>; saveState?: SaveState }) {
-  const isSaving = saveState === 'saving'
-  const isSaved  = saveState === 'saved'
-  const isError  = saveState === 'error'
 
-  const label = isSaved ? 'Saved!' : isError ? 'Save failed — retry' : 'Save graph'
-
+function SaveButton({ state, onSave }: { state: 'idle' | 'saving' | 'saved'; onSave: () => void }) {
+  const label = state === 'saved' ? 'Saved!' : state === 'saving' ? 'Saving…' : 'Save graph'
   return (
     <button
       type="button"
       onClick={onSave}
-      disabled={isSaving || isSaved}
+      disabled={state !== 'idle'}
       title={label}
       aria-label={label}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition
-        ${isSaved
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition disabled:cursor-not-allowed
+        ${state === 'saved'
           ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
-          : isError
-            ? 'border-red-200 bg-red-50 text-red-500 hover:bg-red-100 dark:border-red-800 dark:bg-red-950'
-            : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800'
-        } disabled:cursor-not-allowed`}
+          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800'
+        }`}
     >
-      {isSaving
+      {state === 'saving'
         ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        : isSaved
+        : state === 'saved'
           ? <CheckCircle2 className="h-3.5 w-3.5" />
           : <Save className="h-3.5 w-3.5" />
       }
+    </button>
+  )
+}
+
+function RateButton({
+  icon: Icon,
+  label,
+  active,
+  confirming,
+  variant = 'like',
+  onClick,
+}: {
+  icon: typeof ThumbsUp
+  label: string
+  active: boolean
+  confirming: boolean
+  variant?: 'like' | 'dislike'
+  onClick: () => void
+}) {
+  // like = emerald green when active, dislike = red when active
+  // confirming flash uses the same colour so there's no jarring switch
+  const activeClass = variant === 'dislike'
+    ? 'border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-950 dark:text-red-400'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition
+        ${active || confirming
+          ? activeClass
+          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:hover:bg-gray-800'
+        }`}
+    >
+      {confirming ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
     </button>
   )
 }
@@ -573,7 +603,52 @@ function EventTypeChart({
   return <BarChart rows={labelledRows} labelKey="label" valueKey="event_count" fileName={fileName} title={title} embedded={embedded} />
 }
 
-export default function QueryResultChart({ intent, data, embedded = false, onSave, saveState }: QueryResultChartProps) {
+export default function QueryResultChart({ intent, data, embedded = false, eventName, queryText }: QueryResultChartProps) {
+  const [graphId, setGraphId] = useState<number | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [savedRating, setSavedRating] = useState<1 | -1 | null>(null)
+  const [likeConfirming, setLikeConfirming] = useState(false)
+  const [dislikeConfirming, setDislikeConfirming] = useState(false)
+
+  const handleSave = async () => {
+    if (saveState !== 'idle' || !eventName || !queryText) return
+    setSaveState('saving')
+    try {
+      const res = await fetch(`http://localhost:8000/graphs/${eventName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query_text: queryText, intent_json: intent }),
+      })
+      const json = await res.json() as { id: number }
+      setGraphId(json.id)
+      setSaveState('saved')
+    } catch {
+      setSaveState('idle')
+    }
+  }
+
+  const handleRate = async (rating: 1 | -1) => {
+    // Toggle off if tapping the same rating again
+    if (savedRating === rating) {
+      setSavedRating(null)
+      return
+    }
+    // Rate independently — no save required
+    setSavedRating(rating)
+    if (rating === 1) {
+      setLikeConfirming(true)
+      setTimeout(() => setLikeConfirming(false), 1500)
+    } else {
+      setDislikeConfirming(true)
+      setTimeout(() => setDislikeConfirming(false), 1500)
+    }
+    if (!graphId) return
+    await fetch(`http://localhost:8000/graphs/${graphId}/rate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating }),
+    })
+  }
   const rows = useMemo(() => (isGraphData(data) ? data.edges : asRecords(data)), [data])
   const preparedRows = useMemo(
     () => prepareRowsForSignal(intent.signal, rows),
@@ -616,9 +691,22 @@ export default function QueryResultChart({ intent, data, embedded = false, onSav
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{chartTitle}</h3>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <SaveButton onSave={onSave} saveState={saveState} />
-          <ChartActionButton label="Like" icon={ThumbsUp} />
-          <ChartActionButton label="Dislike" icon={ThumbsDown} />
+          <SaveButton state={saveState} onSave={handleSave} />
+          <RateButton
+            icon={ThumbsUp}
+            label="Good response"
+            active={savedRating === 1}
+            confirming={likeConfirming}
+            onClick={() => void handleRate(1)}
+          />
+          <RateButton
+            icon={ThumbsDown}
+            label="Bad response"
+            active={savedRating === -1}
+            confirming={dislikeConfirming}
+            variant="dislike"
+            onClick={() => void handleRate(-1)}
+          />
         </div>
       </div>
       {content}
