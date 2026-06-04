@@ -2,7 +2,6 @@
 # Query functions for the FastAPI layer.
 # Each function opens a connection, queries the relevant table, and returns
 # a plain list of dicts that FastAPI can serialise directly to JSON.
-# Created, reviewed, tested, and commented by Jesse Ly.
 
 import json
 import logging

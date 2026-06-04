@@ -1,8 +1,16 @@
 # test_llm.py
 # Tests for backend/llm/llm.py
-# Uses mocked Ollama responses — does not require a running Ollama instance.
-# To be extended by Tze Shen Ng as the integration develops.
-# Created by Jesse Ly.
+#
+# These tests validate the LLM-related helper functions without needing
+# an actual Ollama server. They mock `requests.post` responses to return
+# deterministic payloads and verify that the parsing and validation
+# functions behave as expected. The tests include checks for:
+# - JSON parsing and removal of Markdown fences
+# - Intent schema validation and supported signal names
+# - Error handling for network problems and malformed LLM output
+#
+# Mock helper functions (e.g., `mock_ollama_response`) are provided to
+# make expectations explicit and readable.
 
 import json
 import sys

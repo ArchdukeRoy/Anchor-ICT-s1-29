@@ -1,8 +1,23 @@
 # test_api.py
 # Tests for backend/api/main.py
-# Uses FastAPI TestClient and a seeded temporary SQLite database.
-# Does not require a running server or Ollama.
-# Created, reviewed, tested, and commented by Jesse Ly.
+#
+# This test module exercises the FastAPI routes exposed by
+# `backend.api.main`. Tests use FastAPI's `TestClient` and a small,
+# seeded temporary SQLite database created by `make_test_db()` so the
+# suite does not require a running server. The tests are written to be
+# deterministic and self-contained — they create and tear down a
+# database file for each run and patch the database functions so the
+# application code reads from the temporary file.
+#
+# Commenting style and purpose:
+# - Top-level helpers (DB seeding and TestClient wiring) are documented
+#   to explain why they patch `__defaults__` and how the test DB is used.
+# - Tests are grouped by API area (health, signals, dashboard, graphs)
+#   with brief notes describing the assertions and why they validate the
+#   behaviour under test.
+#
+# These comments are designed to help new contributors
+# understand test intent and fixture setup.
 
 import json
 import os

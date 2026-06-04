@@ -1,7 +1,6 @@
 # main.py
 # FastAPI application — exposes all signal queries and LLM routing as REST endpoints.
 # APScheduler runs the GDELT fetch every 15 minutes inside this process.
-# Created, reviewed, tested, and commented by Jesse Ly.
 
 import logging
 import os
@@ -49,9 +48,20 @@ logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler()
 
+# BackgroundScheduler runs in a separate thread and is suitable for
+# light-weight periodic work that should live inside this process.
+# We keep the job simple (run_fetch) to avoid long-running blocking
+# operations inside the scheduler callback — heavier ingestion should
+# be delegated to dedicated worker processes if needed.
+
 
 def _scheduled_fetch() -> None:
     """Triggered by APScheduler every 15 minutes."""
+    # Log start, call the ingestion pipeline and log completion.
+    # Any exceptions raised by run_fetch will propagate here and be
+    # visible in the scheduler logs — APScheduler does not crash the
+    # main process for a single job failure, but keep the job
+    # implementation resilient to transient errors.
     logger.info("[scheduler] Running scheduled GDELT fetch")
     result = run_fetch(DEFAULT_EVENT)
     logger.info(f"[scheduler] Fetch complete: {result}")
@@ -60,6 +70,9 @@ def _scheduled_fetch() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the scheduler on startup and shut it down on exit."""
+    # Schedule the periodic GDELT fetch. We use an interval trigger so
+    # subsequent runs happen at fixed periods (every 15 minutes).
+    # The `id` allows safe replacement or removal of the job later.
     scheduler.add_job(_scheduled_fetch, "interval", minutes=15, id="gdelt_fetch")
     scheduler.start()
     logger.info("[scheduler] APScheduler started — GDELT fetch every 15 minutes")
@@ -352,7 +365,10 @@ def llm_query(body: LLMQueryRequest) -> dict:
     event_name = body.event_name or DEFAULT_EVENT
     _validate_event(event_name)
 
+    # Resolve which local Ollama model to use (fall back to default).
     model = body.model or DEFAULT_OLLAMA_MODEL
+    # Validate requested model early to provide a clear error message
+    # rather than failing later when calling the LLM service.
     if model not in AVAILABLE_OLLAMA_MODELS:
         raise HTTPException(
             status_code=400,
@@ -389,6 +405,8 @@ def _call_llm(query: str, model: str | None = None) -> dict:
     Delegate to backend.llm.llm.call_llm().
     All LLM logic lives in backend/llm/llm.py — edit that file, not this one.
     """
+    # Thin routing layer: main.py does not implement LLM logic itself so
+    # unit tests and local development can stub backend.llm.llm.call_llm().
     return call_llm(query, model=model)
 
 
@@ -400,6 +418,11 @@ def _resolve_intent(intent: dict, event_name: str) -> list | dict:
     signal = intent.get("signal", "")
     params = intent.get("params", {})
 
+    # Map intent signal names to the functions in backend.db.db.
+    # Lambdas delay execution until after we've validated the signal
+    # and allow passing the `params` dict directly as kwargs where
+    # appropriate. Keep this mapping in sync with VALID_SIGNALS in
+    # backend/llm/llm.py and the public endpoints defined above.
     signal_map = {
         "event_volume":         lambda: get_event_volume(event_name, **params),
         "event_type":           lambda: get_event_type(event_name),
@@ -436,4 +459,7 @@ def _validate_event(event_name: str) -> None:
 
 if __name__ == "__main__":
     import uvicorn
+    # Allow the module to be run directly for local development. In
+    # production this app is typically served by a process manager or
+    # container runtime which starts Uvicorn/Gunicorn externally.
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

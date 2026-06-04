@@ -1,6 +1,14 @@
 # test_event_config.py
 # Tests for backend/config/event_config.py
-# Created, reviewed, tested, and commented by Jesse Ly.
+#
+# These tests verify that the event configuration mapping in
+# `backend.config.event_config` is syntactically and semantically valid.
+# They check that the `DEFAULT_EVENT` key exists, that `get_event`
+# returns the expected structure (labels, date ranges, CAMEO codes and
+# countries), and that helper functions behave as expected for malformed
+# inputs. This file is intentionally small; the assertions are designed
+# to serve both as tests and as living documentation for how events are
+# represented inside the project.
 
 import sys
 import os

@@ -1,7 +1,17 @@
 # signal_builder.py
-# Aggregates raw events into the 6 predefined signal tables.
-# Called after each successful fetch, or manually to rebuild all signals.
-# Created, reviewed, tested, and commented by Jesse Ly.
+# Read raw events and produce the six pre-computed signal tables used by the
+# API and frontend. This module is invoked after each successful fetch and is
+# safe to run repeatedly because each builder performs upserts (INSERT ... ON
+# CONFLICT DO UPDATE). The API reads the signal tables rather than the raw
+# events table for performance and to make frontend queries fast and simple.
+#
+# The six signals produced are:
+#  - event_volume
+#  - event_type
+#  - actor_frequency
+#  - location_frequency
+#  - tone_over_time
+#  - actor_location_graph
 
 import logging
 import sqlite3
@@ -19,8 +29,11 @@ logger = logging.getLogger(__name__)
 
 def _load_events(conn: sqlite3.Connection) -> pd.DataFrame:
     """
-    Load all events from the events table and return as a typed DataFrame.
-    The events table is event-agnostic; signal tables carry the event_config label.
+    Load every row from the `events` table and return a pandas DataFrame.
+
+    We coerce `event_date` to pandas datetime here because GDELT stores dates
+    as strings/integers and pandas needs a datetime dtype to use the
+    `.dt` accessor (used later for grouping by date and ISO week).
     """
     df = pd.read_sql_query("SELECT * FROM events", conn)
     df["event_date"] = pd.to_datetime(df["event_date"], errors="coerce")
@@ -28,7 +41,11 @@ def _load_events(conn: sqlite3.Connection) -> pd.DataFrame:
 
 
 def _week_label(date: pd.Timestamp) -> str:
-    """Return ISO week label string e.g. '2026-W14'."""
+    """Return an ISO week label string such as '2023-W15'.
+
+    The format is YEAR-W## where ## is the two-digit ISO week number. This
+    representation is used to group weekly buckets consistently.
+    """
     return f"{date.isocalendar().year}-W{date.isocalendar().week:02d}"
 
 
@@ -38,18 +55,23 @@ def _week_label(date: pd.Timestamp) -> str:
 
 def build_event_volume(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
-    Aggregate daily and weekly event counts into signals_event_volume.
-    Returns total rows upserted.
-    """
-    df_valid = df.dropna(subset=["event_date"])
+    Compute daily and weekly counts and write them to
+    `signals_event_volume`.
 
-    # Daily counts
+    We compute both daily and weekly buckets in the same function and then
+    concatenate them before upserting. `period_type` marks whether a row is a
+    'daily' or 'weekly' bucket and is used by the API and frontend to present
+    the correct x-axis labels.
+    """
+    df_valid = df.dropna(subset=["event_date"])  # Only events with valid dates.
+
+    # Daily counts aggregate by the calendar date.
     daily = df_valid.groupby(df_valid["event_date"].dt.date).size().reset_index()
     daily.columns = ["period", "event_count"]
     daily["period"] = daily["period"].astype(str)
     daily["period_type"] = "daily"
 
-    # Weekly counts
+    # Weekly counts group by an ISO week label computed above.
     df_copy = df_valid.copy()
     df_copy["week"] = df_copy["event_date"].apply(_week_label)
     weekly = df_copy.groupby("week").size().reset_index()
@@ -76,10 +98,14 @@ def build_event_volume(conn: sqlite3.Connection, df: pd.DataFrame, event_config:
 
 def build_event_type(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
-    Aggregate event counts by CAMEO root code (first 2 chars of cameo_code).
-    Returns total rows upserted.
+    Count events grouped by the CAMEO root code.
+
+    The root is the first two characters of `cameo_code`. `CAMEO_LABELS` is an
+    inline dictionary mapping roots to human readable descriptions. All 20
+    root codes are included so the system can report the full behavioural
+    profile rather than only a subset labelled 'conflict'.
     """
-    df_valid = df.dropna(subset=["cameo_code"]).copy()
+    df_valid = df.dropna(subset=["cameo_code"]).copy()  # Skip rows without cameo_code.
     df_valid["cameo_root"] = df_valid["cameo_code"].astype(str).str[:2]
 
     grouped = df_valid.groupby("cameo_root").size().reset_index()
@@ -136,9 +162,11 @@ def build_event_type(conn: sqlite3.Connection, df: pd.DataFrame, event_config: s
 
 def build_actor_frequency(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
-    Aggregate event counts across both actor1 and actor2.
-    Null actors are skipped. Each non-null actor appearance counts separately.
-    Returns total rows upserted.
+    Count how often each actor appears across all events.
+
+    We use a concat pattern to include appearances in both `actor1` and
+    `actor2` columns. If we counted only `actor1` we would miss actors that
+    appear solely in `actor2`.
     """
     actors1 = df.dropna(subset=["actor1"])[["actor1"]].rename(columns={"actor1": "actor"})
     actors2 = df.dropna(subset=["actor2"])[["actor2"]].rename(columns={"actor2": "actor"})
@@ -167,10 +195,14 @@ def build_actor_frequency(conn: sqlite3.Connection, df: pd.DataFrame, event_conf
 
 def build_location_frequency(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
-    Aggregate event counts per location. Null locations are skipped.
-    Returns total rows upserted.
+    Count how often events occur at each location and record the most
+    common country seen for that location.
+
+    We use `.mode()[0]` to pick the most common country value because the
+    same geographic name can occasionally be recorded with varying country
+    codes; the mode picks the majority value.
     """
-    df_valid = df.dropna(subset=["location"])
+    df_valid = df.dropna(subset=["location"])  # Ignore rows with no location.
 
     grouped = df_valid.groupby("location").agg(
         event_count=("location", "size"),
@@ -199,13 +231,16 @@ def build_location_frequency(conn: sqlite3.Connection, df: pd.DataFrame, event_c
 
 def build_tone_over_time(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
-    Aggregate average Goldstein scale per daily and weekly period.
-    Rows with null goldstein_scale or event_date are skipped.
-    Returns total rows upserted.
+    Calculate the average Goldstein score by day and by week.
+
+    The Goldstein scale is a numerical proxy (typically between -10 and +10)
+    where negative values indicate destabilising/hostile events and positive
+    values indicate cooperative/stabilising events. We compute averages for
+    daily and weekly buckets to support different chart resolutions in the UI.
     """
     df_valid = df.dropna(subset=["event_date", "goldstein_scale"])
 
-    # Daily averages
+    # Daily averages grouped by actual date.
     daily = (
         df_valid.groupby(df_valid["event_date"].dt.date)["goldstein_scale"]
         .mean()
@@ -215,7 +250,7 @@ def build_tone_over_time(conn: sqlite3.Connection, df: pd.DataFrame, event_confi
     daily["period"] = daily["period"].astype(str)
     daily["period_type"] = "daily"
 
-    # Weekly averages
+    # Weekly averages grouped by ISO week label.
     df_copy = df_valid.copy()
     df_copy["week"] = df_copy["event_date"].apply(_week_label)
     weekly = df_copy.groupby("week")["goldstein_scale"].mean().reset_index()
@@ -242,10 +277,11 @@ def build_tone_over_time(conn: sqlite3.Connection, df: pd.DataFrame, event_confi
 
 def build_actor_location_graph(conn: sqlite3.Connection, df: pd.DataFrame, event_config: str) -> int:
     """
-    Build actor-location edge weights for the network graph signal.
-    Generates edges from both actor1 and actor2 against location.
-    Rows missing actor or location are skipped.
-    Returns total rows upserted.
+    Build edge weights between actors and locations for the network graph.
+
+    An edge weight counts how many times an actor co-appeared with a
+    particular location across events. Both `actor1` and `actor2` are included
+    via concatenation so that all actor appearances are counted.
     """
     actor_location_pairs = pd.concat([
         df[["actor1", "location"]].rename(columns={"actor1": "actor"}),
@@ -279,18 +315,12 @@ def build_actor_location_graph(conn: sqlite3.Connection, df: pd.DataFrame, event
 
 def build_all_signals(event_name: str, db_path: str = DB_PATH) -> dict:
     """
-    Load all events and rebuild all 6 signal tables for the given event.
+    Public function to rebuild all six signal tables for the given event.
 
-    Parameters
-    ----------
-    event_name : str
-        Key from event_config.EVENTS (e.g. "sudan_2023").
-    db_path : str
-        Path to the SQLite database file.
-
-    Returns
-    -------
-    dict with signal names as keys and row counts as values.
+    This is the only function that external code needs to call. It loads the
+    full events DataFrame once and then runs each builder in sequence against
+    that DataFrame. Each builder performs an upsert so rerunning this whole
+    pipeline is idempotent.
     """
     conn = sqlite3.connect(db_path)
 

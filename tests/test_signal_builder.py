@@ -1,7 +1,22 @@
 # test_signal_builder.py
 # Tests for backend/ingestion/signal_builder.py
-# Uses in-memory SQLite and synthetic DataFrames — does not touch anchor.db.
-# Created, reviewed, tested, and commented by Jesse Ly.
+#
+# The signal builder aggregates raw `events` rows into a set of curated
+# signal tables used by the dashboard. Tests here exercise the builder
+# functions end-to-end using a small deterministic DataFrame and an
+# in-memory SQLite database. The synthetic dataset is crafted so that
+# counts, averages and graph edges can be asserted exactly.
+#
+# The test suite documents the expected behaviour for each builder:
+# - `build_event_volume`: produces both daily and weekly rows and supports
+#   upserts so repeated runs increase counts correctly.
+# - `build_event_type`: groups by CAMEO root and populates human labels.
+# - `build_actor_frequency` / `build_location_frequency`: aggregate actor
+#   and location counts while skipping nulls.
+# - `build_tone_over_time`: computes average Goldstein scores per period
+#   ignoring null Goldstein values.
+# - `build_actor_location_graph`: emits actor-location edges with weights
+#   and skips null actor/location pairs.
 
 import sqlite3
 import sys

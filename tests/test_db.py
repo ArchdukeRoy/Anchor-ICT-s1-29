@@ -1,8 +1,21 @@
 # test_db.py
 # Tests for backend/db/db.py
-# Uses an in-memory SQLite database seeded with known data — does not touch anchor.db.
-# Created, reviewed, tested, and commented by Jesse Ly.
-
+#
+# Unit tests for the low-level database helper functions in
+# `backend.db.db`. These tests use a temporary SQLite database file
+# (created by `make_test_db()`) so that the production database is never
+# modified. The seeded data is intentionally small and deterministic so
+# assertions can reason about exact counts and top values.
+#
+# What these tests document for new readers:
+# - Why a file-based temporary DB is used (so db.py functions can open
+#   their own connections using a path argument).
+# - The expected shape of seeded data and how it supports specific
+#   endpoint behaviours (e.g., `num_mentions` values support media
+#   attention sums).
+# - Test grouping reflects the public functions exported by `db.py`.
+#
+ 
 import json
 import sqlite3
 import sys

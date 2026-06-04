@@ -2,7 +2,6 @@
 # Fetches the latest GDELT 2.0 export, filters by CAMEO code and country,
 # inserts new records into the events table, and logs the run.
 # Called by APScheduler every 15 minutes inside the FastAPI process.
-# Created, reviewed, tested, and commented by Jesse Ly.
 
 import io
 import logging
@@ -24,6 +23,10 @@ from backend.config.event_config import get_event
 
 # ---------------------------------------------------------------------------
 # GDELT 2.0 column positions (0-indexed) in the export CSV.
+# The GDELT codebook uses 1-based positions; the values below are the
+# codebook position minus one so they can be used directly with pandas
+# positional indexing. GDELT export CSVs do not include a header row so
+# columns are addressed by position rather than name.
 # Full schema: https://www.gdeltproject.org/data/documentation/GDELT-Event_Codebook-V2.0.pdf
 # ---------------------------------------------------------------------------
 COL_EVENT_ID     = 0    # GLOBALEVENTID — unique identifier
@@ -74,6 +77,10 @@ def _download_export(url: str) -> pd.DataFrame:
     response = requests.get(url, timeout=60)
     response.raise_for_status()
     with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+        # The export ZIP contains a single CSV file. We read it without a
+        # header because the GDELT CSVs are positional. low_memory=False
+        # keeps pandas from chunking types across columns which can cause
+        # unexpected dtypes for large files.
         csv_filename = [n for n in z.namelist() if n.endswith(".CSV")][0]
         with z.open(csv_filename) as f:
             df = pd.read_csv(f, sep="\t", header=None, low_memory=False)
@@ -87,6 +94,11 @@ def _filter_events(df: pd.DataFrame, cameo_codes: list, countries: list) -> pd.D
       - ActionGeo_CountryCode (col 53) is in the configured countries list
     Both filters are applied only when the respective config list is non-empty.
     Passing an empty countries list captures global events (future use).
+
+    The filters are conditional on the configuration so that an empty list
+    means "do not filter by this dimension". This makes the behaviour
+    flexible for future scenarios that may want global captures or different
+    geographic scopes.
     """
     if cameo_codes:
         df = df[df[COL_CAMEO_ROOT].astype(str).isin(cameo_codes)]
@@ -96,7 +108,12 @@ def _filter_events(df: pd.DataFrame, cameo_codes: list, countries: list) -> pd.D
 
 
 def _safe(value):
-    """Return None for NaN/NaT/non-finite values, otherwise return the value."""
+    """
+    Normalise potentially-missing CSV values so they are safe to insert into
+    SQLite. pandas represents missing values as NaN or NaT; this helper
+    converts those to None (which maps to SQL NULL) and leaves valid values
+    unchanged.
+    """
     try:
         if pd.isna(value):
             return None
@@ -133,6 +150,10 @@ def _insert_events(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
     cur = conn.cursor()
     inserted = 0
 
+    # Use row iteration because we perform per-row cleaning and conditional
+    # INSERT OR IGNORE operations. INSERT OR IGNORE respects the UNIQUE
+    # constraint on event_id in the events table and prevents duplicate
+    # ingestion.
     for _, row in df.iterrows():
         try:
             event_id = str(int(row[COL_EVENT_ID]))
@@ -165,6 +186,9 @@ def _insert_events(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
                 _safe(row[COL_SOURCE_URL]),
             ),
         )
+        # cur.rowcount == 1 indicates the INSERT succeeded; when the row
+        # is ignored due to the UNIQUE constraint this will be 0. We use this
+        # to count actual inserts versus duplicates skipped by the DB.
         if cur.rowcount == 1:
             inserted += 1
 
@@ -180,7 +204,7 @@ def _log_run(
     status: str,
     notes: str | None = None,
 ) -> None:
-    """Write a row to ingestion_log."""
+    """Write a row to ingestion_log recording the outcome of a fetch run."""
     conn.execute(
         """
         INSERT INTO ingestion_log
@@ -228,6 +252,10 @@ def run_fetch(event_name: str, db_path: str = DB_PATH) -> dict:
     try:
         logger.info(f"[fetcher] Starting fetch for '{event_name}'")
 
+        # Full flow: 1) resolve the latest export URL, 2) download the
+        # zipped CSV, 3) filter by CAMEO / country, 4) insert new rows, 5)
+        # log the run. The returned summary dictionary is useful for the
+        # FastAPI scheduler endpoint that triggers fetches.
         export_url = _get_export_url()
         logger.info(f"[fetcher] Export URL: {export_url}")
 
@@ -308,6 +336,11 @@ def run_backfill(
     errors = 0
     day_count = 0
 
+    # Iterate day-by-day and attempt to download the midnight export file for
+    # each date. GDELT provides one file per day with a timestamp of 000000 in
+    # the name; some days may be missing and return HTTP 404 which is treated
+    # as a normal skip rather than an error. Because inserts use
+    # INSERT OR IGNORE, re-running this backfill is safe and idempotent.
     current = start
     while current <= end:
         day_str = current.strftime("%Y%m%d")

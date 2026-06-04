@@ -1,9 +1,21 @@
 # test_fetcher.py
 # Tests for backend/ingestion/fetcher.py
-# Uses a temporary in-memory SQLite database — does not touch anchor.db.
-# Network calls are made for integration tests (marked clearly).
-# Created, reviewed, tested, and commented by Jesse Ly.
-
+#
+# The fetcher module downloads GDELT export files, filters them and
+# inserts rows into the `events` table. These tests are split into two
+# groups:
+#
+# 1) Unit tests — run offline using synthetic DataFrames and an in-memory
+#    SQLite database. They exercise helpers like `_safe`, `_parse_date`,
+#    `_filter_events`, `_insert_events` and `_log_run` with deterministic
+#    inputs so results are repeatable.
+#
+# 2) Integration tests — these contact GDELT's `lastupdate.txt` and the
+#    ZIP exports. They are explicitly marked and require network access.
+#    Keep them separate from CI unless you want external dependency
+#    coverage.
+#
+ 
 import sqlite3
 import sys
 import os
