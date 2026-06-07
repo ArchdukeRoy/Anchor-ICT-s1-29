@@ -15,56 +15,70 @@ Project Anchor is a locally deployed web application that ingests GDELT news eve
 
 ```
 Anchor-ICT-s1-29/
-├── backend/
+├── backend/                         Python backend services
 │   ├── api/
-│   │   └── main.py                   FastAPI app, scheduler, LLM routing
+│   │   └── main.py                   FastAPI app, API routes, scheduler wiring
 │   ├── config/
-│   │   └── event_config.py           Centralised event configuration
+│   │   └── event_config.py           Event configuration and CAMEO code mappings
 │   ├── db/
-│   │   ├── init_db.py                Database schema creation
-│   │   └── db.py                     Query functions for FastAPI
-│   ├── llm/
-│   │   └── llm.py                    Ollama integration and intent parsing
-│   └── ingestion/
-│       ├── fetcher.py                GDELT ingestion pipeline
-│       └── signal_builder.py         Signal aggregation
-├── src/
+│   │   ├── init_db.py                SQLite schema creation
+│   │   └── db.py                     Database query and persistence helpers
+│   ├── ingestion/
+│   │   ├── fetcher.py                GDELT ingestion and backfill pipeline
+│   │   └── signal_builder.py         Signal aggregation and derived metrics
+│   └── llm/
+│       └── llm.py                    Ollama integration and query intent parsing
+├── src/                              React + TypeScript frontend
 │   ├── components/
-│   │   ├── layout/
-│   │   │   ├── DashboardLayout.jsx   Main layout wrapper
-│   │   │   ├── Sidebar.jsx           Navigation sidebar
-│   │   │   └── Topbar.jsx            Top navigation bar
+│   │   ├── charts/                   Dashboard and LLM chart components
+│   │   │   ├── EventTypeChart.tsx
+│   │   │   ├── EventVolumeChart.tsx
+│   │   │   └── QueryResultChart.tsx
+│   │   ├── layout/                   Shared dashboard layout components
+│   │   │   ├── DashboardLayout.tsx
+│   │   │   ├── Sidebar.tsx
+│   │   │   └── Topbar.tsx
 │   │   └── ui/
-│   │       └── StatCard.jsx          Reusable stat card component
+│   │       └── StatCard.tsx          Reusable stat card component
 │   ├── hooks/
-│   │   └── useLocalStorage.js        Local storage hook
+│   │   ├── useLocalStorage.js        Local storage helper hook
+│   │   └── useSignal.ts              Signal data fetching hook
 │   ├── lib/
-│   │   └── utils.js                  Shared utilities
+│   │   ├── api.ts                    Frontend API client helpers
+│   │   ├── llmModels.ts              Available LLM model options
+│   │   ├── types.ts                  Shared frontend TypeScript types
+│   │   └── utils.js                  Shared frontend utilities
 │   ├── pages/
 │   │   ├── dashboard/
-│   │   │   ├── DashboardPage.jsx     Main dashboard view
-│   │   │   ├── InsightsPage.jsx      Insights and LLM query view
-│   │   │   ├── ReportsPage.jsx       Reports view
-│   │   │   └── SettingsPage.jsx      Settings view
-│   │   └── NotFoundPage.jsx          404 page
+│   │   │   ├── BackendTestPage.tsx    Backend connectivity test page
+│   │   │   ├── DashboardPage.tsx      Main dashboard view
+│   │   │   ├── InsightsPage.tsx       LLM query and insight generation view
+│   │   │   ├── ReportsPage.tsx        Reports view
+│   │   │   └── SettingsPage.tsx       Settings view
+│   │   └── NotFoundPage.tsx          404 page
 │   ├── router/
-│   │   └── index.jsx                 React Router configuration
-│   ├── App.jsx                       Root app component
+│   │   └── index.tsx                 React Router configuration
+│   ├── App.tsx                       Root app component
 │   ├── index.css                     Global styles
-│   └── main.jsx                      Entry point
-├── tests/
+│   └── main.tsx                      Frontend entry point
+├── tests/                            Backend unit and API tests
+│   ├── test_api.py                   22/22 passing
+│   ├── test_db.py                    24/24 passing
 │   ├── test_event_config.py          6/6 passing
 │   ├── test_fetcher.py               15/15 passing
-│   ├── test_signal_builder.py        14/14 passing
-│   ├── test_db.py                    24/24 passing
-│   ├── test_api.py                   22/22 passing
-│   └── test_llm.py                   8/8 passing
-├── index.html
-├── package.json
-├── postcss.config.js
-├── requirements.txt
-├── tailwind.config.js
-└── vite.config.js
+│   ├── test_llm.py                   8/8 passing
+│   └── test_signal_builder.py        14/14 passing
+├── docs/
+│   ├── README.md                     Backend documentation index
+│   └── backend.md                    Backend module and API reference
+├── index.html                        Vite HTML entry point
+├── package.json                      Frontend dependencies and npm scripts
+├── package-lock.json                 Locked frontend dependency versions
+├── requirements.txt                  Python backend dependencies
+├── tailwind.config.js                Tailwind CSS configuration
+├── postcss.config.js                 PostCSS configuration
+├── tsconfig*.json                    TypeScript configuration
+└── vite.config.ts                    Vite build configuration
 ```
 
 ---
