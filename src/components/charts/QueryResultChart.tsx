@@ -231,18 +231,6 @@ function RateButton({
   )
 }
 
-function downloadJson(filename: string, value: unknown) {
-  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-}
-
 function triggerDownload(url: string, filename: string) {
   const link = document.createElement('a')
   link.href = url
@@ -265,8 +253,6 @@ function downloadPlotPng(
   const width = Math.max(Math.round(rect.width), 1)
   const height = Math.max(Math.round(rect.height), 1)
   const clonedSvg = svg.cloneNode(true) as SVGSVGElement
-  clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-  clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
   clonedSvg.setAttribute('width', String(width))
   clonedSvg.setAttribute('height', String(height))
 
@@ -373,42 +359,37 @@ function StreamingPlaceholder() {
   )
 }
 
-function ResultTable({ rows, fileName }: { rows: Record<string, unknown>[]; fileName: string }) {
+function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
   if (rows.length === 0) return <EmptyState />
 
   // Limit visible columns and rows so raw event tables do not overwhelm the chat message.
   const columns = Object.keys(rows[0]).slice(0, 8)
 
   return (
-    <>
-      <div className="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-gray-800">
-        <table className="min-w-full divide-y divide-gray-200 text-left text-xs dark:divide-gray-800">
-          <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-gray-950 dark:text-gray-400">
-            <tr>
+    <div className="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-gray-800">
+      <table className="min-w-full divide-y divide-gray-200 text-left text-xs dark:divide-gray-800">
+        <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-gray-950 dark:text-gray-400">
+          <tr>
+            {columns.map((column) => (
+              <th key={column} className="px-3 py-2 font-semibold">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 bg-white text-gray-700 dark:divide-gray-800 dark:bg-gray-900 dark:text-gray-300">
+          {rows.slice(0, 20).map((row, index) => (
+            <tr key={index}>
               {columns.map((column) => (
-                <th key={column} className="px-3 py-2 font-semibold">
-                  {column}
-                </th>
+                <td key={column} className="max-w-[220px] truncate px-3 py-2">
+                  {formatValue(row[column])}
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 bg-white text-gray-700 dark:divide-gray-800 dark:bg-gray-900 dark:text-gray-300">
-            {rows.slice(0, 20).map((row, index) => (
-              <tr key={index}>
-                {columns.map((column) => (
-                  <td key={column} className="max-w-[220px] truncate px-3 py-2">
-                    {formatValue(row[column])}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-3 flex justify-end">
-        <DownloadButton label="Download JSON" onClick={() => downloadJson(fileName, rows)} />
-      </div>
-    </>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -656,7 +637,6 @@ export default function QueryResultChart({ intent, data, embedded = false, event
   )
   const { rows: streamedRows, isStreaming } = useProgressiveRows(preparedRows)
   const pngFileName = filenameFor(intent.signal, 'png')
-  const jsonFileName = filenameFor(intent.signal, 'json')
   const chartTitle = signalTitles[intent.signal]
 
   let content
@@ -675,9 +655,9 @@ export default function QueryResultChart({ intent, data, embedded = false, event
   } else if (intent.signal === 'event_type') {
     content = <EventTypeChart rows={streamedRows} fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'actor_location_graph' && isGraphData(data)) {
-    content = <ResultTable rows={streamedRows} fileName={jsonFileName} />
+    content = <ResultTable rows={streamedRows} />
   } else {
-    content = <ResultTable rows={streamedRows} fileName={jsonFileName} />
+    content = <ResultTable rows={streamedRows} />
   }
 
   if (embedded) {
