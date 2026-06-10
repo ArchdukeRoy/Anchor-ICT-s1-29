@@ -73,6 +73,7 @@ function isBarSignal(signal: SignalName) {
 }
 
 function prepareRowsForSignal(signal: SignalName, rows: Record<string, unknown>[]) {
+  // Keep chat charts compact: line charts show the latest points, bar charts show the top values.
   if (isLineSignal(signal)) {
     return rows.slice(-52)
   }
@@ -90,6 +91,7 @@ function useProgressiveRows(rows: Record<string, unknown>[]) {
   const [visibleCount, setVisibleCount] = useState(0)
 
   useEffect(() => {
+    // Reveal rows in small batches so AI results feel streamed instead of appearing all at once.
     setVisibleCount(0)
     if (rows.length === 0) return
 
@@ -246,6 +248,7 @@ function downloadPlotPng(
   title: string,
   yAxisTitle?: string,
 ) {
+  // Plotly renders as SVG; cloning it through a canvas lets users save a plain PNG image.
   const svg = graphElement?.querySelector('svg.main-svg')
   if (!(svg instanceof SVGSVGElement)) return
 
@@ -640,6 +643,7 @@ export default function QueryResultChart({ intent, data, embedded = false, event
   const chartTitle = signalTitles[intent.signal]
 
   let content
+  // Route each backend signal to the chart shape users expect; list-like results stay as tables.
   if (isStreaming && streamedRows.length === 0) {
     content = <StreamingPlaceholder />
   } else if (intent.signal === 'event_volume') {

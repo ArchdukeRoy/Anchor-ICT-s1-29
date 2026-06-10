@@ -45,6 +45,7 @@ const starterPrompts = [
   'Show average conflict tone over time.',
 ]
 
+// Centralizes the /query call so the page can treat successful responses and API errors uniformly.
 async function submitQuery(promptText: string, model: LlmModel): Promise<QueryResponse> {
   const response = await fetch('/query', {
     method: 'POST',
@@ -148,6 +149,7 @@ export default function InsightsPage() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
+    // Keep the newest user question, loading bubble, or chart visible as the conversation grows.
     if (!scrollRef.current) return
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages, isThinking])
@@ -156,6 +158,7 @@ export default function InsightsPage() {
     const trimmed = promptText.trim()
     if (!trimmed || isThinking) return
 
+    // Add the user's message immediately, then append the assistant message after the API returns.
     const userMessage: ChatMessage = {
       id: nextIdRef.current++,
       role: 'user',
@@ -196,6 +199,7 @@ export default function InsightsPage() {
   }
 
   const handleStarterPromptChange = (promptText: string) => {
+    // Selecting a starter prompt fills the composer without submitting, so users can edit it first.
     setSelectedStarterPrompt(promptText)
     setInput(promptText)
     inputRef.current?.focus()
