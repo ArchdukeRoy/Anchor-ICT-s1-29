@@ -362,6 +362,134 @@ function StreamingPlaceholder() {
   )
 }
 
+// Minimal Plotly line used as a row sparkline inside SummaryTimeline.
+function Sparkline({ rows, yKey, color }: { rows: Record<string, unknown>[]; yKey: string; color: string }) {
+  if (rows.length === 0) {
+    return <div className="h-[72px] animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+  }
+  return (
+    <div className="h-[72px]">
+      <Plot
+        data={[{
+          x: rows.map((r) => formatPeriodLabel(r.period)),
+          y: rows.map((r) => Number(r[yKey] ?? 0)),
+          type: 'scatter',
+          mode: 'lines',
+          line: { color, width: 2 },
+          hovertemplate: '%{x}: %{y}<extra></extra>',
+        }]}
+        layout={{
+          autosize: true,
+          margin: { t: 4, r: 4, b: 4, l: 4 },
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          xaxis: { visible: false },
+          yaxis: { visible: false },
+          showlegend: false,
+          hovermode: 'x',
+        }}
+        config={{ responsive: true, displayModeBar: false }}
+        useResizeHandler
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
+  )
+}
+
+// Computes 4-week-over-prior-4-week delta and percentage for a given numeric key.
+function computeTrend(rows: Record<string, unknown>[], key: string) {
+  if (rows.length < 8) return { delta: 0, pct: 0 }
+  const vals = rows.slice(-8).map((r) => Number(r[key] ?? 0))
+  const prior  = vals.slice(0, 4).reduce((a, b) => a + b, 0) / 4
+  const recent = vals.slice(4).reduce((a, b) => a + b, 0) / 4
+  const delta = recent - prior
+  const pct = prior !== 0 ? (delta / Math.abs(prior)) * 100 : 0
+  return { delta, pct }
+}
+
+// Stacks three sparklines (event volume, tone, media) with a verdict banner.
+// All signal data is fetched client-side; the LLM is bypassed for this chart type.
+// Verdict is a simple heuristic: volume down + tone up = Improving, volume up + tone down = Escalating.
+function SummaryTimeline({ eventName, embedded }: { eventName: string; embedded?: boolean }) {
+  const [eventVol, setEventVol] = useState<Record<string, unknown>[]>([])
+  const [tone,     setTone]     = useState<Record<string, unknown>[]>([])
+  const [media,    setMedia]    = useState<Record<string, unknown>[]>([])
+
+  useEffect(() => {
+    const get = (url: string, set: (d: Record<string, unknown>[]) => void) => {
+      fetch(url)
+        .then((r) => r.json() as Promise<unknown>)
+        .then((d) => set(Array.isArray(d) ? (d as Record<string, unknown>[]) : []))
+        .catch(() => {})
+    }
+    get(`/signals/${eventName}/event-volume?period_type=weekly`,    setEventVol)
+    get(`/signals/${eventName}/tone-over-time?period_type=weekly`,  setTone)
+    get(`/signals/${eventName}/media-attention?period_type=weekly`, setMedia)
+  }, [eventName])
+
+  const volTrend   = computeTrend(eventVol, 'event_count')
+  const toneTrend  = computeTrend(tone,     'avg_goldstein')
+  const mediaTrend = computeTrend(media,    'total_mentions')
+
+  // Goldstein scale: higher = more cooperative, lower = more hostile — so tone rising is good.
+  let verdict     = 'Ongoing / Unclear'
+  let verdictBg   = 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'
+  let verdictText = 'text-amber-700 dark:text-amber-400'
+  if (volTrend.delta < 0 && toneTrend.delta > 0) {
+    verdict = 'Improving'
+    verdictBg   = 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800'
+    verdictText = 'text-emerald-700 dark:text-emerald-400'
+  } else if (volTrend.delta > 0 && toneTrend.delta < 0) {
+    verdict = 'Escalating'
+    verdictBg   = 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800'
+    verdictText = 'text-red-700 dark:text-red-400'
+  }
+
+  const TrendBadge = ({ pct, positiveIsGood }: { pct: number; positiveIsGood: boolean }) => {
+    const up = pct >= 0
+    const good = up === positiveIsGood
+    return (
+      <span className={`text-xs font-semibold ${good ? 'text-emerald-600' : 'text-red-500'}`}>
+        {up ? '↑' : '↓'} {Math.abs(pct).toFixed(0)}%
+      </span>
+    )
+  }
+
+  const rows = [
+    { label: 'Event Volume',   data: eventVol, yKey: 'event_count',    color: '#4c6ef5', trend: volTrend,   positiveIsGood: false },
+    { label: 'Conflict Tone',  data: tone,     yKey: 'avg_goldstein',  color: '#f59e0b', trend: toneTrend,  positiveIsGood: true  },
+    { label: 'Media Attention',data: media,    yKey: 'total_mentions', color: '#10b981', trend: mediaTrend, positiveIsGood: false },
+  ]
+
+  const loading = eventVol.length === 0 && tone.length === 0 && media.length === 0
+  if (loading) return <StreamingPlaceholder />
+
+  return (
+    <div className={`space-y-3 ${embedded ? '' : 'pt-1'}`}>
+      <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${verdictBg}`}>
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Overall assessment</span>
+        <span className={`text-sm font-bold ${verdictText}`}>{verdict}</span>
+        <span className="ml-auto text-[11px] text-gray-400">last 4 weeks vs prior 4 weeks</span>
+      </div>
+      <div className="space-y-2">
+        {rows.map(({ label, data, yKey, color, trend, positiveIsGood }) => (
+          <div key={label} className="flex items-center gap-4 rounded-lg border border-gray-100 bg-white/60 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/50">
+            <div className="w-36 shrink-0">
+              <p className="text-xs font-semibold text-gray-600 dark:text-gray-300">{label}</p>
+              <div className="mt-0.5">
+                <TrendBadge pct={trend.pct} positiveIsGood={positiveIsGood} />
+              </div>
+            </div>
+            <div className="flex-1">
+              <Sparkline rows={data.slice(-52)} yKey={yKey} color={color} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
   if (rows.length === 0) return <EmptyState />
 
@@ -1004,13 +1132,16 @@ export default function QueryResultChart({ intent, data, embedded = false, event
 
   let content
   // Route each backend signal to the chart shape users expect; list-like results stay as tables.
+  // summary chart_type bypasses signal routing entirely — SummaryTimeline fetches its own data.
   if (isStreaming && streamedRows.length === 0) {
     content = <StreamingPlaceholder />
+  } else if (intent.chart_type === 'summary') {
+    content = <SummaryTimeline eventName={eventName ?? 'sudan_2023'} embedded={embedded} />
   } else if (intent.signal === 'event_volume') {
     content = <LineChart rows={streamedRows} yKey="event_count" yLabel="Events" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'tone_over_time') {
     content = <AnnotatedLineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={pngFileName} title={chartTitle} embedded={embedded} />
-  } else if (intent.signal === 'media_attention') {
+  } else if (intent.signal === 'media_attention' && intent.chart_type === 'dual_line') {
     content = (
       <DualLineChart
         mediaRows={streamedRows}
@@ -1020,6 +1151,8 @@ export default function QueryResultChart({ intent, data, embedded = false, event
         embedded={embedded}
       />
     )
+  } else if (intent.signal === 'media_attention') {
+    content = <LineChart rows={streamedRows} yKey="total_mentions" yLabel="Mentions" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'actor_frequency' && intent.chart_type === 'scatter') {
     content = <ActorActivityScatter rows={streamedRows} eventName={eventName ?? 'sudan_2023'} fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'actor_frequency') {
