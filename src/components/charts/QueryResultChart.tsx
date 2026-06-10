@@ -639,6 +639,210 @@ function ActorLocationTable({ edges }: { edges: Record<string, unknown>[] }) {
   )
 }
 
+// Computes a simple rolling average over a sliding window of the given size.
+function rollingAvg(values: number[], window: number): number[] {
+  return values.map((_, i) => {
+    const slice = values.slice(Math.max(0, i - window + 1), i + 1)
+    return slice.reduce((a, b) => a + b, 0) / slice.length
+  })
+}
+
+// Renders tone_over_time as a line chart with a 4-week rolling average overlay and
+// anomaly annotations. Points more than 1 SD from the overall mean are flagged in red,
+// providing a partial answer to Q17 (unusually violent weeks) without a new backend signal.
+function AnnotatedLineChart({
+  rows,
+  yKey,
+  yLabel,
+  fileName,
+  title,
+  embedded,
+}: {
+  rows: Record<string, unknown>[]
+  yKey: string
+  yLabel: string
+  fileName: string
+  title: string
+  embedded?: boolean
+}) {
+  if (rows.length === 0) return <EmptyState />
+
+  const plotTheme = getPlotTheme()
+  const xValues = rows.map((r) => formatPeriodLabel(r.period))
+  const yValues = rows.map((r) => Number(r[yKey] ?? 0))
+
+  const mean = yValues.reduce((a, b) => a + b, 0) / yValues.length
+  const sd = Math.sqrt(yValues.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / yValues.length)
+  const rolling = rollingAvg(yValues, 4)
+
+  const annotations = yValues
+    .map((v, i) => (Math.abs(v - mean) > sd ? i : -1))
+    .filter((i) => i !== -1)
+    .map((i) => ({
+      x: xValues[i],
+      y: yValues[i],
+      text: yValues[i].toFixed(1),
+      showarrow: true,
+      arrowhead: 2,
+      arrowsize: 0.8,
+      arrowcolor: '#ef4444',
+      font: { size: 10, color: '#ef4444' },
+      bgcolor: 'rgba(254,242,242,0.9)',
+      bordercolor: '#ef4444',
+      borderwidth: 1,
+    }))
+
+  return (
+    <div className={`query-plot-frame ${embedded ? 'h-[220px]' : 'h-[360px]'}`}>
+      <Plot
+        data={[
+          {
+            x: xValues,
+            y: yValues,
+            type: 'scatter',
+            mode: rows.length <= 26 ? 'lines+markers' : 'lines',
+            name: yLabel,
+            line: { color: '#4c6ef5', width: 2.5 },
+            marker: { color: '#4c6ef5', size: 5 },
+            fill: 'tozeroy',
+            fillcolor: plotTheme.fillColor,
+            hovertemplate: `%{x}<br>${yLabel}: %{y}<extra></extra>`,
+          },
+          {
+            x: xValues,
+            y: rolling,
+            type: 'scatter',
+            mode: 'lines',
+            name: '4-week avg',
+            line: { color: '#9ca3af', width: 1.5, dash: 'dash' },
+            hovertemplate: '%{x}<br>4-week avg: %{y:.2f}<extra></extra>',
+          },
+        ]}
+        layout={{
+          autosize: true,
+          margin: { t: 12, r: 24, b: 56, l: 96 },
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          font: { family: 'Inter, system-ui, sans-serif', size: 13, color: plotTheme.labelColor },
+          xaxis: {
+            automargin: true,
+            nticks: 7,
+            showgrid: false,
+            tickangle: 0,
+            tickfont: { size: 12, color: plotTheme.axisColor },
+            zeroline: false,
+          },
+          yaxis: {
+            automargin: true,
+            showgrid: true,
+            gridcolor: plotTheme.gridColor,
+            zeroline: false,
+            tickfont: { size: 12, color: plotTheme.axisColor },
+            title: { text: yLabel, font: { size: 12, color: plotTheme.axisColor }, standoff: 12 },
+          },
+          annotations,
+          legend: { x: 0.01, y: 0.99, bgcolor: 'transparent', font: { size: 11 } },
+          showlegend: true,
+          hovermode: 'x unified',
+        }}
+        config={{ responsive: true, displayModeBar: false }}
+        useResizeHandler
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
+  )
+}
+
+// Scatter plot of actor activity (event_count) vs geographic reach (sum of edge_weights
+// from actor_location_graph). Fetches actor_location_graph client-side to derive the
+// second dimension since actor_frequency only contains event counts.
+// Provides a partial answer to Q11 (active + widespread actors) without a new backend signal.
+// Only shown when the LLM returns chart_type "scatter" for the actor_frequency signal.
+function ActorActivityScatter({
+  rows,
+  eventName,
+  fileName,
+  title,
+  embedded,
+}: {
+  rows: Record<string, unknown>[]
+  eventName: string
+  fileName: string
+  title: string
+  embedded?: boolean
+}) {
+  const [reachByActor, setReachByActor] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    fetch(`/signals/${eventName}/actor-location-graph`)
+      .then((r) => r.json() as Promise<{ edges?: { source: string; weight: number }[] }>)
+      .then((d) => {
+        // Sum edge weights per actor to get a geographic reach score.
+        const totals: Record<string, number> = {}
+        for (const edge of d.edges ?? []) {
+          totals[edge.source] = (totals[edge.source] ?? 0) + edge.weight
+        }
+        setReachByActor(totals)
+      })
+      .catch(() => {})
+  }, [eventName])
+
+  if (rows.length === 0) return <EmptyState />
+
+  const plotTheme = getPlotTheme()
+  const actors = rows.map((r) => String(r.actor ?? ''))
+  const activity = rows.map((r) => Number(r.event_count ?? 0))
+  const reach = actors.map((a) => reachByActor[a] ?? 0)
+
+  return (
+    <div className={`query-plot-frame ${embedded ? 'h-[220px]' : 'h-[360px]'}`}>
+      <Plot
+        data={[
+          {
+            x: reach,
+            y: activity,
+            text: actors,
+            type: 'scatter',
+            mode: 'markers+text',
+            textposition: 'top center',
+            textfont: { size: 10, color: plotTheme.labelColor },
+            marker: { color: '#4c6ef5', size: 9, opacity: 0.8 },
+            hovertemplate: '<b>%{text}</b><br>Activity: %{y}<br>Geographic reach: %{x}<extra></extra>',
+          },
+        ]}
+        layout={{
+          autosize: true,
+          margin: { t: 12, r: 24, b: 64, l: 72 },
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          font: { family: 'Inter, system-ui, sans-serif', size: 13, color: plotTheme.labelColor },
+          xaxis: {
+            automargin: true,
+            showgrid: true,
+            gridcolor: plotTheme.gridColor,
+            zeroline: false,
+            tickfont: { size: 12, color: plotTheme.axisColor },
+            title: { text: 'Geographic reach (total edge weight)', font: { size: 12, color: plotTheme.axisColor }, standoff: 12 },
+          },
+          yaxis: {
+            automargin: true,
+            showgrid: true,
+            gridcolor: plotTheme.gridColor,
+            zeroline: false,
+            tickfont: { size: 12, color: plotTheme.axisColor },
+            title: { text: 'Event count', font: { size: 12, color: plotTheme.axisColor }, standoff: 12 },
+          },
+          showlegend: false,
+          hovermode: 'closest',
+        }}
+        config={{ responsive: true, displayModeBar: false }}
+        useResizeHandler
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
+  )
+}
+
 function BarChart({
   rows,
   labelKey,
@@ -805,7 +1009,7 @@ export default function QueryResultChart({ intent, data, embedded = false, event
   } else if (intent.signal === 'event_volume') {
     content = <LineChart rows={streamedRows} yKey="event_count" yLabel="Events" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'tone_over_time') {
-    content = <LineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={pngFileName} title={chartTitle} embedded={embedded} />
+    content = <AnnotatedLineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'media_attention') {
     content = (
       <DualLineChart
@@ -816,6 +1020,8 @@ export default function QueryResultChart({ intent, data, embedded = false, event
         embedded={embedded}
       />
     )
+  } else if (intent.signal === 'actor_frequency' && intent.chart_type === 'scatter') {
+    content = <ActorActivityScatter rows={streamedRows} eventName={eventName ?? 'sudan_2023'} fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'actor_frequency') {
     content = <BarChart rows={streamedRows} labelKey="actor" valueKey="event_count" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'location_frequency') {

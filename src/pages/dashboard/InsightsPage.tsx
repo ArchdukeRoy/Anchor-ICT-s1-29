@@ -121,6 +121,47 @@ ORDER BY event_date DESC
 LIMIT ?`,
 }
 
+// Maps each signal to the ordered list of params passed to its SQL query (matching db.py).
+const signalParamOrder: Record<string, string[]> = {
+  event_volume:        ['event_config', 'period_type'],
+  event_type:          ['event_config'],
+  actor_frequency:     ['event_config', 'limit'],
+  location_frequency:  ['event_config', 'limit'],
+  tone_over_time:      ['event_config', 'period_type'],
+  media_attention:     [],
+  actor_location_graph:['event_config', 'min_edge_weight'],
+  recent_events:       ['limit'],
+}
+
+// Per-signal fallback values matching backend API defaults (backend/api/main.py Query defaults).
+const signalParamDefaults: Record<string, Record<string, string | number>> = {
+  event_volume:         { period_type: 'daily' },
+  tone_over_time:       { period_type: 'weekly' },
+  media_attention:      { period_type: 'daily' },
+  actor_frequency:      { limit: 10 },
+  location_frequency:   { limit: 10 },
+  recent_events:        { limit: 20 },
+  actor_location_graph: { min_edge_weight: 1 },
+}
+
+// Replaces each ? in the SQL template with its actual runtime value.
+// Falls back to the backend default if the param wasn't set by the LLM.
+// String values are wrapped in single quotes; numbers are bare.
+function fillSQL(signal: string, sql: string, eventName: string, params: Record<string, unknown>): string {
+  const order = signalParamOrder[signal] ?? []
+  const defaults = signalParamDefaults[signal] ?? {}
+  const values = order.map((key) => {
+    if (key === 'event_config') return `'${eventName}'`
+    const v = params[key] ?? defaults[key]
+    return typeof v === 'string' ? `'${v}'` : String(v)
+  })
+  let filled = sql
+  for (const val of values) {
+    filled = filled.replace('?', val)
+  }
+  return filled
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   // Tracks whether the SQL code block is expanded for this specific message bubble.
   const [showSQL, setShowSQL] = useState(false)
@@ -175,7 +216,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               </div>
               {showSQL && signalSQL[message.result.intent.signal] && (
                 <pre className="overflow-x-auto rounded-lg bg-gray-950 px-4 py-3 text-[11px] leading-5 text-green-400 dark:bg-black">
-                  {signalSQL[message.result.intent.signal]}
+                  {fillSQL(
+                    message.result.intent.signal,
+                    signalSQL[message.result.intent.signal],
+                    message.result.event_name,
+                    message.result.intent.params,
+                  )}
                 </pre>
               )}
             </div>
