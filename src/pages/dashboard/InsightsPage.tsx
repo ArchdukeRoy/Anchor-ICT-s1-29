@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
-import { ArrowUp, Bot, Sparkles, User2 } from 'lucide-react'
+import { ArrowUp, Bot, ChevronDown, ChevronRight, Sparkles, User2 } from 'lucide-react'
 import QueryResultChart from '@/components/charts/QueryResultChart'
 import { LlmModel, getLlmModelLabel, getStoredLlmModel } from '@/lib/llmModels'
 
@@ -32,6 +32,7 @@ interface ChatMessage {
   role: MessageRole
   content: string
   result?: QueryResponse
+  responseTimeMs?: number
 }
 
 const EVENT_NAME = 'sudan_2023'
@@ -76,7 +77,53 @@ async function submitQuery(promptText: string, model: LlmModel): Promise<QueryRe
   return response.json() as Promise<QueryResponse>
 }
 
+// Static map of signal → SQL shown in the chart metadata strip.
+// All backend queries are pre-written (no dynamic SQL generation), so this can be
+// kept in sync with backend/db/db.py without any runtime cost.
+const signalSQL: Record<string, string> = {
+  event_volume: `SELECT period, event_count
+FROM signals_event_volume
+WHERE event_config = ? AND period_type = ?
+ORDER BY period ASC`,
+  event_type: `SELECT cameo_root, cameo_description, event_count
+FROM signals_event_type
+WHERE event_config = ?
+ORDER BY event_count DESC`,
+  actor_frequency: `SELECT actor, event_count
+FROM signals_actor_frequency
+WHERE event_config = ?
+ORDER BY event_count DESC
+LIMIT ?`,
+  location_frequency: `SELECT location, country, event_count
+FROM signals_location_frequency
+WHERE event_config = ?
+ORDER BY event_count DESC
+LIMIT ?`,
+  tone_over_time: `SELECT period, avg_goldstein
+FROM signals_tone_over_time
+WHERE event_config = ? AND period_type = ?
+ORDER BY period ASC`,
+  media_attention: `SELECT DATE(event_date) AS period,
+       SUM(num_mentions) AS total_mentions
+FROM events
+WHERE num_mentions IS NOT NULL
+GROUP BY period
+ORDER BY period ASC`,
+  actor_location_graph: `SELECT actor, location, edge_weight
+FROM signals_actor_location_graph
+WHERE event_config = ? AND edge_weight >= ?
+ORDER BY edge_weight DESC`,
+  recent_events: `SELECT event_id, event_date, cameo_code,
+       actor1, actor2, country, location,
+       goldstein_scale, num_mentions, source_url
+FROM events
+ORDER BY event_date DESC
+LIMIT ?`,
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
+  // Tracks whether the SQL code block is expanded for this specific message bubble.
+  const [showSQL, setShowSQL] = useState(false)
   const isAssistant = message.role === 'assistant'
   const hasChart = isAssistant && Boolean(message.result)
   return (
@@ -100,12 +147,39 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {message.content && <div className="whitespace-pre-wrap">{message.content}</div>}
 
         {isAssistant && message.result && (
-          <QueryResultChart
-            intent={message.result.intent}
-            data={message.result.data}
-            eventName={message.result.event_name}
-            queryText={message.result.query}
-          />
+          <>
+            <QueryResultChart
+              intent={message.result.intent}
+              data={message.result.data}
+              eventName={message.result.event_name}
+              queryText={message.result.query}
+            />
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap gap-3 text-[11px] text-gray-400 dark:text-gray-500">
+                <span>signal: <span className="font-semibold text-gray-500 dark:text-gray-400">{message.result.intent.signal}</span></span>
+                <span>chart: <span className="font-semibold text-gray-500 dark:text-gray-400">{message.result.intent.chart_type}</span></span>
+                <span>model: <span className="font-semibold text-gray-500 dark:text-gray-400">{message.result.model}</span></span>
+                {message.responseTimeMs !== undefined && (
+                  <span>response time: <span className="font-semibold text-gray-500 dark:text-gray-400">{message.responseTimeMs < 1000 ? `${message.responseTimeMs}ms` : `${(message.responseTimeMs / 1000).toFixed(1)}s`}</span></span>
+                )}
+                {signalSQL[message.result.intent.signal] && (
+                  <button
+                    type="button"
+                    onClick={() => setShowSQL((v) => !v)}
+                    className="inline-flex items-center gap-0.5 font-semibold text-brand-500 hover:text-brand-600 dark:text-brand-400"
+                  >
+                    {showSQL ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    SQL
+                  </button>
+                )}
+              </div>
+              {showSQL && signalSQL[message.result.intent.signal] && (
+                <pre className="overflow-x-auto rounded-lg bg-gray-950 px-4 py-3 text-[11px] leading-5 text-green-400 dark:bg-black">
+                  {signalSQL[message.result.intent.signal]}
+                </pre>
+              )}
+            </div>
+          </>
         )}
       </div>
 
@@ -170,12 +244,16 @@ export default function InsightsPage() {
     setIsThinking(true)
 
     try {
+      // Measure full round-trip time: LLM intent resolution + signal DB query.
+      const t0 = performance.now()
       const result = await submitQuery(trimmed, llmModel)
+      const responseTimeMs = Math.round(performance.now() - t0)
       const assistantMessage: ChatMessage = {
         id: nextIdRef.current++,
         role: 'assistant',
         content: '',
         result,
+        responseTimeMs,
       }
       setMessages((current) => [...current, assistantMessage])
     } catch (error) {

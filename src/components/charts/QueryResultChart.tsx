@@ -483,6 +483,162 @@ function LineChart({
   )
 }
 
+// Overlays media attention (total_mentions) and event volume (event_count) on a dual y-axis chart.
+// The LLM only returns one signal per response, so event_volume is fetched here directly
+// from the signals endpoint using the same period_type the LLM chose for media_attention.
+function DualLineChart({
+  mediaRows,
+  eventName,
+  periodType,
+  fileName,
+  embedded,
+}: {
+  mediaRows: Record<string, unknown>[]
+  eventName: string
+  periodType: string
+  fileName: string
+  embedded?: boolean
+}) {
+  const [eventRows, setEventRows] = useState<Record<string, unknown>[]>([])
+
+  useEffect(() => {
+    fetch(`/signals/${eventName}/event-volume?period_type=${periodType}`)
+      .then((r) => r.json() as Promise<unknown>)
+      .then((d) => setEventRows(Array.isArray(d) ? (d as Record<string, unknown>[]) : []))
+      .catch(() => {})
+  }, [eventName, periodType])
+
+  if (mediaRows.length === 0 && eventRows.length === 0) return <EmptyState />
+
+  const plotTheme = getPlotTheme()
+
+  return (
+    <div className={`query-plot-frame ${embedded ? 'h-[220px]' : 'h-[360px]'}`}>
+      <Plot
+        data={[
+          {
+            x: eventRows.map((r) => formatPeriodLabel(r.period)),
+            y: eventRows.map((r) => Number(r.event_count ?? 0)),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Events',
+            line: { color: '#4c6ef5', width: 2.5 },
+            fill: 'tozeroy',
+            fillcolor: plotTheme.fillColor,
+            yaxis: 'y',
+            hovertemplate: '%{x}<br>Events: %{y}<extra></extra>',
+          },
+          {
+            x: mediaRows.map((r) => formatPeriodLabel(r.period)),
+            y: mediaRows.map((r) => Number(r.total_mentions ?? 0)),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Mentions',
+            line: { color: '#f59e0b', width: 2.5 },
+            yaxis: 'y2',
+            hovertemplate: '%{x}<br>Mentions: %{y}<extra></extra>',
+          },
+        ]}
+        layout={{
+          autosize: true,
+          margin: { t: 12, r: 80, b: 56, l: 72 },
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          font: { family: 'Inter, system-ui, sans-serif', size: 13, color: plotTheme.labelColor },
+          xaxis: {
+            automargin: true,
+            nticks: 7,
+            showgrid: false,
+            tickangle: 0,
+            tickfont: { size: 12, color: plotTheme.axisColor },
+            zeroline: false,
+          },
+          yaxis: {
+            automargin: true,
+            showgrid: true,
+            gridcolor: plotTheme.gridColor,
+            zeroline: false,
+            tickfont: { size: 12, color: plotTheme.axisColor },
+            title: { text: 'Events', font: { size: 12, color: '#4c6ef5' }, standoff: 12 },
+          },
+          yaxis2: {
+            automargin: true,
+            overlaying: 'y',
+            side: 'right',
+            showgrid: false,
+            zeroline: false,
+            tickfont: { size: 12, color: plotTheme.axisColor },
+            title: { text: 'Mentions', font: { size: 12, color: '#f59e0b' }, standoff: 12 },
+          },
+          legend: { x: 0.01, y: 0.99, bgcolor: 'transparent', font: { size: 11 } },
+          showlegend: true,
+          hovermode: 'x unified',
+        }}
+        config={{ responsive: true, displayModeBar: false }}
+        useResizeHandler
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
+  )
+}
+
+// Renders actor-location edges with a client-side actor filter.
+// The actor_location_graph signal has no actor param — it always returns all edges —
+// so filtering happens here in the browser rather than via a new backend query.
+function ActorLocationTable({ edges }: { edges: Record<string, unknown>[] }) {
+  const [filter, setFilter] = useState('')
+
+  // Unique sorted actor list drives the placeholder count in the search input.
+  const actors = useMemo(
+    () => [...new Set(edges.map((e) => String(e.source ?? '')))].sort(),
+    [edges],
+  )
+
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    return edges
+      .filter((e) => !q || String(e.source ?? '').toLowerCase().includes(q))
+      .sort((a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0))
+  }, [edges, filter])
+
+  if (edges.length === 0) return <EmptyState />
+
+  return (
+    <div className="space-y-3">
+      <input
+        type="text"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder={`Filter by actor — ${actors.length} actors total`}
+        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:placeholder-gray-500"
+      />
+      <div className="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-gray-800">
+        <table className="min-w-full divide-y divide-gray-200 text-left text-xs dark:divide-gray-800">
+          <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-gray-950 dark:text-gray-400">
+            <tr>
+              <th className="px-3 py-2 font-semibold">Actor</th>
+              <th className="px-3 py-2 font-semibold">Location</th>
+              <th className="px-3 py-2 font-semibold text-right">Activity</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 bg-white text-gray-700 dark:divide-gray-800 dark:bg-gray-900 dark:text-gray-300">
+            {filtered.slice(0, 50).map((row, i) => (
+              <tr key={i}>
+                <td className="max-w-[180px] truncate px-3 py-2">{String(row.source ?? '')}</td>
+                <td className="max-w-[180px] truncate px-3 py-2">{String(row.target ?? '')}</td>
+                <td className="px-3 py-2 text-right font-medium">{String(row.weight ?? '')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {filtered.length > 50 && (
+        <p className="text-right text-xs text-gray-400">Showing 50 of {filtered.length} rows</p>
+      )}
+    </div>
+  )
+}
+
 function BarChart({
   rows,
   labelKey,
@@ -651,7 +807,15 @@ export default function QueryResultChart({ intent, data, embedded = false, event
   } else if (intent.signal === 'tone_over_time') {
     content = <LineChart rows={streamedRows} yKey="avg_goldstein" yLabel="Avg Goldstein" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'media_attention') {
-    content = <LineChart rows={streamedRows} yKey="total_mentions" yLabel="Mentions" fileName={pngFileName} title={chartTitle} embedded={embedded} />
+    content = (
+      <DualLineChart
+        mediaRows={streamedRows}
+        eventName={eventName ?? 'sudan_2023'}
+        periodType={String(intent.params.period_type ?? 'weekly')}
+        fileName={pngFileName}
+        embedded={embedded}
+      />
+    )
   } else if (intent.signal === 'actor_frequency') {
     content = <BarChart rows={streamedRows} labelKey="actor" valueKey="event_count" fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'location_frequency') {
@@ -659,7 +823,7 @@ export default function QueryResultChart({ intent, data, embedded = false, event
   } else if (intent.signal === 'event_type') {
     content = <EventTypeChart rows={streamedRows} fileName={pngFileName} title={chartTitle} embedded={embedded} />
   } else if (intent.signal === 'actor_location_graph' && isGraphData(data)) {
-    content = <ResultTable rows={streamedRows} />
+    content = <ActorLocationTable edges={(data as { edges: Record<string, unknown>[] }).edges} />
   } else {
     content = <ResultTable rows={streamedRows} />
   }
