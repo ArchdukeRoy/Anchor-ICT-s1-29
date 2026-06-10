@@ -12,6 +12,7 @@ type ThemeMode = 'light' | 'dark'
 const THEME_STORAGE_KEY = 'anchor-theme'
 
 function applyTheme(mode: ThemeMode) {
+  // Tailwind dark mode is controlled by the root class, while colorScheme updates native controls.
   document.documentElement.classList.toggle('dark', mode === 'dark')
   document.documentElement.style.colorScheme = mode
 }
@@ -26,11 +27,13 @@ export default function SettingsPage() {
   const [llmModel, setLlmModel] = useState<LlmModel>(getStoredLlmModel)
 
   useEffect(() => {
+    // Theme is applied globally because layout components live outside the settings page.
     applyTheme(themeMode)
     window.localStorage.setItem(THEME_STORAGE_KEY, themeMode)
   }, [themeMode])
 
   useEffect(() => {
+    // InsightsPage reads this value on load before sending natural-language queries.
     window.localStorage.setItem(LLM_MODEL_STORAGE_KEY, llmModel)
   }, [llmModel])
 
