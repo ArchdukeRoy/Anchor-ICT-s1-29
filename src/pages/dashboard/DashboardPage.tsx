@@ -5,6 +5,7 @@ import EventVolumeChart from '@/components/charts/EventVolumeChart'
 import EventTypeChart from '@/components/charts/EventTypeChart'
 import { PeriodType, QueryIntent } from '@/lib/types'
 import QueryResultChart from '@/components/charts/QueryResultChart'
+import LocationMap from '@/components/charts/LocationMap'
 
 const BASE_URL = 'http://localhost:8000'
 const EVENT_NAME = 'sudan_2023'
@@ -233,28 +234,27 @@ export default function DashboardPage() {
         </button>
       </div>
  
-      {/* Charts + Map */}
+      {/* Charts */}
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-6">
-          <div className="card">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Conflict Timeline</h2>
-            <div className="mt-4 h-56">
-              <EventVolumeChart periodType={periodType} />
-            </div>
-          </div>
-          <div className="card">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Conflict Breakdown</h2>
-            <div className="mt-4 h-56">
-              <EventTypeChart />
-            </div>
+        <div className="card">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Conflict Timeline</h2>
+          <div className="mt-4 h-56">
+            <EventVolumeChart periodType={periodType} />
           </div>
         </div>
- 
         <div className="card">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Map</h2>
-          <div className="mt-4 flex h-[320px] items-center justify-center rounded-lg bg-gray-50 text-sm text-gray-400 ring-1 ring-gray-100 dark:bg-gray-950 dark:text-gray-500 dark:ring-gray-800">
-            [ Map goes here ]
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Conflict Breakdown</h2>
+          <div className="mt-4 h-56">
+            <EventTypeChart />
           </div>
+        </div>
+      </div>
+
+      {/* Map */}
+      <div className="card">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Map</h2>
+        <div className="mt-4 h-[380px] overflow-hidden rounded-lg">
+          <LocationMap eventName={EVENT_NAME} height="380px" />
         </div>
       </div>
  

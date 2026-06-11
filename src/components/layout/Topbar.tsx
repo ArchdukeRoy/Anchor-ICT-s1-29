@@ -1,8 +1,17 @@
+import { useEffect, useState } from 'react'
 import { Sparkles } from 'lucide-react'
 import { getLlmModelLabel, getStoredLlmModel } from '@/lib/llmModels'
 
 export default function Topbar() {
-  const modelLabel = getLlmModelLabel(getStoredLlmModel())
+  const [modelLabel, setModelLabel] = useState(() => getLlmModelLabel(getStoredLlmModel()))
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      setModelLabel(getLlmModelLabel((e as CustomEvent<string>).detail))
+    }
+    window.addEventListener('llm-model-changed', handler)
+    return () => window.removeEventListener('llm-model-changed', handler)
+  }, [])
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-6 transition-colors dark:border-gray-800 dark:bg-gray-950">

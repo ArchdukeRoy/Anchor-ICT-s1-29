@@ -33,8 +33,8 @@ export default function SettingsPage() {
   }, [themeMode])
 
   useEffect(() => {
-    // InsightsPage reads this value on load before sending natural-language queries.
     window.localStorage.setItem(LLM_MODEL_STORAGE_KEY, llmModel)
+    window.dispatchEvent(new CustomEvent('llm-model-changed', { detail: llmModel }))
   }, [llmModel])
 
   return (

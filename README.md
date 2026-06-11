@@ -88,6 +88,14 @@ Anchor-ICT-s1-29/
 ### Requirements
 Node.js LTS — download from https://nodejs.org
 
+### Key dependencies
+| Package | Purpose |
+|---------|---------|
+| react-plotly.js | Calendar heatmap on Reports page |
+| react-leaflet + leaflet | Interactive map on Reports page |
+| react-router-dom | Client-side routing |
+| lucide-react | Icon set |
+
 ### Steps
 
 ```bash
